@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+@theme {
+  --color-void: #000000;
+  --color-base: #080808;
+  --color-surface: #111111;
+  --color-raised: #191919;
+  --color-line: #292929;
+  --color-fg: #ffffff;
+  --color-dim: #a3a3a3;
+  --color-mute: #6b6b6b;
+  --color-ok: #55b987;
+  --color-warn: #d6a85b;
+  --color-bad: #d46b6b;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --ease-calm: cubic-bezier(0.2, 0, 0, 1);
+}
+
+html {
+  background: var(--color-base);
+  color: var(--color-fg);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-base);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  line-height: 1.55;
+}
+
+::selection {
+  background: var(--color-fg);
+  color: var(--color-void);
+}
+
+:focus-visible {
+  outline: 1.5px solid var(--color-fg);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-dim);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text inputs share one quiet treatment. */
+.field {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  padding: 8px 11px;
+  font-size: 14px;
+  transition: border-color 120ms var(--ease-calm);
+}
+.field:hover {
+  border-color: #3a3a3a;
+}
+.field:focus {
+  outline: none;
+  border-color: var(--color-fg);
+}
+.field::placeholder {
+  color: var(--color-mute);
+}
+
+/* Reality column removed from contention. */
+.excluded {
+  opacity: 0.42;
+  transition: opacity 240ms var(--ease-calm);
+}
+
+dialog {
+  margin: auto;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  padding: 0;
+}
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.72);
+}
+dialog[data-drawer] {
+  margin: 0 0 0 auto;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+  border-width: 0 0 0 1px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+.rise {
+  animation: rise 220ms var(--ease-calm);
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-surface) 25%, var(--color-raised) 50%, var(--color-surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* React Flow, restyled to sit inside the instrument. */
+.react-flow__controls {
+  box-shadow: none !important;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--color-surface) !important;
+  border-bottom: 1px solid var(--color-line) !important;
+  fill: var(--color-dim) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--color-raised) !important;
+}
+.react-flow__attribution {
+  background: transparent !important;
+}
+.react-flow__attribution a {
+  color: var(--color-mute) !important;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-sheet,
+  .print-sheet * {
+    color: #111 !important;
+    border-color: #ccc !important;
+    background: transparent !important;
+  }
+}
