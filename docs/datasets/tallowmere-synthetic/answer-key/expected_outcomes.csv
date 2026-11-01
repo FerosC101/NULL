@@ -1,0 +1,17 @@
+Snapshot,Claim,Expected Assessment
+E,No unauthorized access occurred during the month-end close.,CONTRADICTED
+E,All hosts were monitored throughout the window.,CONTRADICTED
+E,MFA was enforced on every sign-in.,CONTRADICTED
+E,All supplier invoices were approved before payment.,UNVERIFIED
+F,No unauthorized access occurred during the month-end close.,SUPPORTED
+F,All hosts were monitored throughout the window.,SUPPORTED
+F,MFA was enforced on every sign-in.,SUPPORTED
+F,All supplier invoices were approved before payment.,UNVERIFIED
+G,No unauthorized access occurred during the month-end close.,PARTIALLY IDENTIFIED
+G,All hosts were monitored throughout the window.,CONTRADICTED
+G,MFA was enforced on every sign-in.,SUPPORTED
+G,All supplier invoices were approved before payment.,UNVERIFIED
+H,No unauthorized access occurred during the month-end close.,CONTRADICTED
+H,All hosts were monitored throughout the window.,SUPPORTED
+H,MFA was enforced on every sign-in.,SUPPORTED
+H,All supplier invoices were approved before payment.,UNVERIFIED
