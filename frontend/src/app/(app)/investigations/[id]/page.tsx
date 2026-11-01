@@ -1,209 +1,75 @@
 "use client";
 
-import { ArrowLeft, Check, ChevronDown, CircleDashed, FileDown, Loader2, Minus, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileDown, Loader2, Waypoints } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { StageRail } from "@/components/lifecycle";
 import { useSession } from "@/components/shell";
-import { AssessmentMark, Button, ErrorNote, Loading, SectionHeader, StatusText, Tag, useToast } from "@/components/ui";
-import { EvidenceTable } from "@/components/workspace/evidence";
+import { AssessmentMark, Button, ErrorNote, Loading, StatusText, useToast } from "@/components/ui";
+import { AdvancedAnalysis } from "@/components/workspace/advanced";
+import { EvidenceProvider, EvidenceRefs } from "@/components/workspace/evidence";
 import { CompetingRealities } from "@/components/workspace/realities";
 import { RecommendedInvestigation } from "@/components/workspace/recommended";
+import { ActionsStage, ClaimStage, EvidenceStage, FindingsStage, StageHeading, VerificationStage } from "@/components/workspace/stages";
 import { api, useApi } from "@/lib/api";
-import { ago, duration, sentence, utc } from "@/lib/format";
-import type { InvestigationDetail, ReportSummary, TimelineItem, ToolExecutionView } from "@/lib/types";
+import { ago } from "@/lib/format";
+import type { Exhibits, InvestigationDetail, ReportSummary } from "@/lib/types";
 
 const RUNNING = new Set(["queued", "analyzing", "running_checks"]);
+const STAGE_KEYS = ["claim", "evidence", "explanations", "tests", "findings", "actions", "verification"];
+// Links written before the stage layout still land in the right place.
+const ANCHORS: Record<string, string> = { recommended: "tests", discovered: "findings" };
 
-const LEDGER: { key: keyof InvestigationDetail["ledger"]; label: string; hint: string }[] = [
-  { key: "observed", label: "Observed", hint: "Read directly from records" },
-  { key: "inferred", label: "Inferred", hint: "Derived by the validators" },
-  { key: "assumed", label: "Assumed", hint: "Taken as true, not tested" },
-  { key: "unknown", label: "Unknown", hint: "Required and not yet seen" },
-  { key: "would_change", label: "Could change this", hint: "Checks still open" },
-];
-
-const KINDS: Record<string, string> = {
-  evidence_gap: "Evidence gap",
-  unsupported_assumption: "Unsupported assumption",
-  incomplete_observation: "Incomplete observation",
-  measurement_bias: "Measurement bias",
-};
-
-const SEVERITY_DOT: Record<string, string> = { critical: "bg-bad", high: "bg-warn", medium: "bg-dim", low: "bg-mute" };
-
-function StageIcon({ status }: { status: string }) {
-  const common = "size-[18px] rounded-full border flex items-center justify-center shrink-0 bg-base";
-  if (status === "done") return <span className={`${common} border-fg`}><Check size={10} strokeWidth={3} /></span>;
-  if (status === "running") return <span className={`${common} border-fg`}><Loader2 size={10} className="animate-spin" /></span>;
-  if (status === "failed") return <span className={`${common} border-bad text-bad`}><X size={10} strokeWidth={3} /></span>;
-  if (status === "skipped") return <span className={`${common} border-line text-mute`}><Minus size={10} /></span>;
-  return <span className={`${common} border-line`}><span className="sr-only">Pending</span></span>;
+function stageFromHash() {
+  const hash = window.location.hash.slice(1);
+  const key = ANCHORS[hash] ?? hash;
+  return STAGE_KEYS.includes(key) ? key : null;
 }
 
-function Timeline({ items }: { items: TimelineItem[] }) {
+function Summary({ investigation, onAct, busy, canReport }: { investigation: InvestigationDetail; onAct: () => void; busy: boolean; canReport: boolean }) {
+  const { key_finding: finding, next_action: next, uncertainty } = investigation.lifecycle;
+  const claim = investigation.realities.filter((r) => r.claim_true);
+  const against = [...new Set(claim.flatMap((r) => r.contradicting))];
+  const support = [...new Set(claim.flatMap((r) => r.supporting))];
+  const survivors = investigation.realities.filter((r) => r.compatibility !== "incompatible");
+  const actionable = next.kind === "open_stage" || (next.kind === "report" && canReport);
   return (
-    <ol className="relative">
-      <span aria-hidden className="absolute bottom-3 left-[8.5px] top-3 w-px bg-line" />
-      {items.map((item) => (
-        <li key={item.stage} className="relative flex gap-3 pb-4 last:pb-0">
-          <StageIcon status={item.status} />
-          <div className="min-w-0">
-            <p className={`text-[13px] leading-[18px] ${item.status === "pending" ? "text-mute" : ""}`}>{item.label}</p>
-            {item.finished_at && <p className="mono text-[11px] text-mute">{utc(item.finished_at)}</p>}
-            {item.status === "pending" && item.detail && <p className="text-xs text-dim">{item.detail}</p>}
-            {item.status === "skipped" && <p className="text-xs text-mute">Skipped</p>}
-            {item.status !== "pending" && item.detail && item.status !== "skipped" && (
-              <p className="mt-0.5 text-xs text-dim">{item.detail}</p>
-            )}
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function ToolHistory({ executions }: { executions: ToolExecutionView[] }) {
-  const [open, setOpen] = useState(false);
-  const failed = executions.filter((e) => e.status === "failed").length;
-  const records = executions.reduce((total, e) => total + e.records_read, 0);
-  return (
-    <div>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full items-center justify-between text-left">
-        <span className="label">Tool execution history</span>
-        <ChevronDown size={14} className={`text-dim transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
-      </button>
-      <p className="mt-1 text-xs text-dim">
-        {executions.length} calls, {records.toLocaleString()} records read
-        {failed > 0 && <span className="text-bad">, {failed} failed</span>}
-      </p>
-      {open && (
-        <ul className="mt-3 space-y-2.5">
-          {executions.map((execution) => (
-            <li key={execution.id} className="text-xs">
-              <span className="flex items-baseline justify-between gap-2">
-                <span className={`mono truncate ${execution.status === "failed" ? "text-bad" : "text-dim"}`}>{execution.tool}</span>
-                <span className="mono shrink-0 text-mute">{duration(execution.started_at, execution.finished_at)}</span>
-              </span>
-              <span className="text-mute">
-                {execution.role}
-                {execution.records_read > 0 && ` · ${execution.records_read.toLocaleString()} records`}
-              </span>
-              {execution.error && <span className="mt-0.5 block text-bad">{execution.error}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function Ledger({ ledger }: { ledger: InvestigationDetail["ledger"] }) {
-  const [active, setActive] = useState<keyof InvestigationDetail["ledger"]>(ledger.unknown?.length ? "unknown" : "inferred");
-  const current = LEDGER.find((l) => l.key === active)!;
-  const items = ledger[active] ?? [];
-  return (
-    <div className="rounded-lg border border-line">
-      <div role="tablist" aria-label="Knowledge ledger" className="grid grid-cols-2 divide-line border-b border-line sm:grid-cols-5 sm:divide-x">
-        {LEDGER.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={active === key}
-            onClick={() => setActive(key)}
-            className={`px-4 py-3 text-left transition-colors ${active === key ? "bg-raised" : "hover:bg-surface"}`}
-          >
-            <span className="mono block text-xl font-light">{ledger[key]?.length ?? 0}</span>
-            <span className={`text-xs ${active === key ? "text-fg" : "text-dim"}`}>{label}</span>
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" className="px-5 py-4">
-        <p className="label mb-2">{current.hint}</p>
-        {items.length ? (
-          <ul className="space-y-1.5 text-[13px] text-dim">
-            {items.map((item) => <li key={item}>{item}</li>)}
-          </ul>
+    <section aria-label="Summary" className="grid gap-px border-y border-line bg-line md:grid-cols-3">
+      <div className="bg-base py-5 md:pr-6">
+        <h2 className="label mb-2">What NULL found</h2>
+        {finding ? (
+          <>
+            <p className="text-[17px] font-light leading-snug">{finding.title}</p>
+            <p className="mt-1.5 line-clamp-3 text-[13px] text-dim">{finding.body}</p>
+            <div className="mt-2"><EvidenceRefs refs={finding.evidence_refs} /></div>
+          </>
         ) : (
-          <p className="text-[13px] text-mute">Nothing in this category.</p>
+          <p className="text-[15px] text-dim">{RUNNING.has(investigation.status) ? "Nothing yet. Analysis is running." : "No weakness was identified in the evidence examined."}</p>
         )}
       </div>
-    </div>
-  );
-}
-
-function Conclusion({ investigation }: { investigation: InvestigationDetail }) {
-  const [truth, setTruth] = useState<{ narrative: string; matches: boolean; comparable: boolean; expected_assessment: string } | null>(null);
-  const toast = useToast();
-  const provisional = investigation.status !== "concluded";
-  const supporting = [...new Set(investigation.realities.flatMap((r) => (r.claim_true ? r.supporting : r.contradicting)))];
-  const against = [...new Set(investigation.realities.flatMap((r) => (r.claim_true ? r.contradicting : r.supporting)))];
-
-  async function reveal() {
-    try {
-      setTruth(await api(`/investigations/${investigation.id}/ground-truth`));
-    } catch (cause) {
-      toast(cause instanceof Error ? cause.message : "Answer key unavailable", "bad");
-    }
-  }
-
-  return (
-    <div className="rounded-lg border border-line">
-      <div className="p-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <AssessmentMark value={investigation.assessment} large />
-          {provisional && <Tag tone="warn">Provisional</Tag>}
-        </div>
-        <p className="mt-3 max-w-3xl text-[15px] text-dim">{investigation.assessment_rationale}</p>
+      <div className="bg-base py-5 md:px-6">
+        <h2 className="label mb-2">Why this assessment</h2>
+        {investigation.realities.length > 0 ? (
+          <dl className="space-y-2 text-[13px]">
+            <div className="flex items-baseline gap-3"><dt className="w-[90px] shrink-0 text-xs text-mute">Still possible</dt><dd>{survivors.length} of {investigation.realities.length} explanations</dd></div>
+            <div className="flex items-baseline gap-3"><dt className="w-[90px] shrink-0 text-xs text-mute">For the claim</dt><dd><EvidenceRefs refs={support} /></dd></div>
+            <div className="flex items-baseline gap-3"><dt className="w-[90px] shrink-0 text-xs text-mute">Against it</dt><dd><EvidenceRefs refs={against} /></dd></div>
+          </dl>
+        ) : <p className="text-[13px] text-dim">{investigation.assessment_rationale || "Not evaluated yet."}</p>}
+        {uncertainty && <p className="mt-2.5 line-clamp-2 text-xs text-dim">{uncertainty}</p>}
       </div>
-      <dl className="grid gap-6 border-t border-line p-6 md:grid-cols-3">
-        <div>
-          <dt className="label mb-2">Evidence for the claim</dt>
-          <dd className="mono text-xs text-dim">{supporting.join("  ") || "None"}</dd>
-          <dt className="label mb-2 mt-5">Evidence against the claim</dt>
-          <dd className={`mono text-xs ${against.length ? "text-fg" : "text-dim"}`}>{against.join("  ") || "None"}</dd>
-        </div>
-        <div>
-          <dt className="label mb-2">Assumptions</dt>
-          {investigation.assumptions.map((assumption) => (
-            <dd key={assumption.key} className="mb-1.5 flex gap-2 text-[13px] text-dim">
-              <span className="mono mt-px shrink-0 text-[11px] text-mute">{assumption.status === "held" ? "HELD" : assumption.status === "violated" ? "FAIL" : "OPEN"}</span>
-              {assumption.text}
-            </dd>
-          ))}
-        </div>
-        <div>
-          <dt className="label mb-2">Limitations</dt>
-          {investigation.limitations.map((limit) => (
-            <dd key={limit} className="mb-1.5 text-[13px] text-dim">{limit}</dd>
-          ))}
-        </div>
-      </dl>
-      {investigation.status === "concluded" && (
-        <div className="border-t border-line px-6 py-4">
-          {truth ? (
-            <div className="text-[13px]">
-              <p className="label mb-1.5">Demo answer key</p>
-              <p className="text-dim">{truth.narrative}</p>
-              <p className="mt-2 flex items-center gap-2">
-                {truth.comparable ? (
-                  truth.matches ? (
-                    <><Check size={13} className="text-ok" aria-hidden /> NULL&apos;s conclusion matches the answer key.</>
-                  ) : (
-                    <><X size={13} className="text-bad" aria-hidden /> The answer key expected {truth.expected_assessment} for the full claim.</>
-                  )
-                ) : (
-                  <span className="text-dim">The answer key describes the full 24-hour access claim, so this investigation can&apos;t be scored against it.</span>
-                )}
-              </p>
-            </div>
-          ) : (
-            <Button small onClick={reveal}>Reveal demo answer key</Button>
-          )}
-        </div>
-      )}
-    </div>
+      <div className="bg-base py-5 md:pl-6">
+        <h2 className="label mb-2">What should happen next</h2>
+        <p className="text-[17px] font-light leading-snug">{next.label}</p>
+        <p className="mt-1.5 line-clamp-2 text-[13px] text-dim">{next.detail}</p>
+        {actionable && (
+          <Button variant="primary" className="mt-3" busy={busy} onClick={onAct}>
+            {next.kind === "report" ? "Generate report" : "Open"} <ArrowRight size={14} aria-hidden />
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -213,7 +79,26 @@ export default function WorkspacePage() {
   const { can } = useSession();
   const toast = useToast();
   const [exporting, setExporting] = useState(false);
+  const [chosen, setChosen] = useState<string | null>(null);
   const { data, error, reload } = useApi<InvestigationDetail>(`/investigations/${id}`, (d) => RUNNING.has(d.status));
+  // Refetched whenever the investigation moves, so exhibits never lag what the page says.
+  const { data: exhibits, loading: exhibitsLoading } = useApi<Exhibits>(data ? `/investigations/${id}/exhibits?at=${encodeURIComponent(data.updated_at)}` : null);
+
+  useEffect(() => {
+    const sync = () => setChosen(stageFromHash());
+    sync();
+    window.addEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+
+  const select = useCallback((key: string) => {
+    window.history.pushState(null, "", `#${key}`);
+    setChosen(key);
+  }, []);
 
   if (error && !data) {
     return (
@@ -241,8 +126,6 @@ export default function WorkspacePage() {
     }
   }
 
-  const running = RUNNING.has(data.status);
-
   async function refreshAfterDecision() {
     const updated = await reload();
     if (updated && RUNNING.has(updated.status)) {
@@ -254,154 +137,86 @@ export default function WorkspacePage() {
     }
   }
 
+  const running = RUNNING.has(data.status);
+  const stage = chosen ?? data.lifecycle.current;
+  const next = data.lifecycle.next_action;
+
   return (
-    <main className="mx-auto max-w-[1280px] px-8 pb-24 pt-7 max-sm:px-4">
-      <Link href="/investigations" className="mb-5 inline-flex items-center gap-1.5 text-[13px] text-dim transition-colors hover:text-fg">
-        <ArrowLeft size={14} aria-hidden /> Investigations
-      </Link>
+    <EvidenceProvider evidence={data.evidence} investigationId={data.id}>
+      <main className="mx-auto max-w-[1160px] px-8 pb-24 pt-6 max-sm:px-4">
+        <Link href="/investigations" className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-dim transition-colors hover:text-fg">
+          <ArrowLeft size={14} aria-hidden /> Investigations
+        </Link>
 
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
-        <div>
-          <h1 className="text-[26px] font-light leading-tight tracking-[-0.02em]">{data.name}</h1>
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-dim">
-            <span className="mono text-xs">{data.ref}</span>
-            <StatusText status={data.status} />
-            <span>Updated {ago(data.updated_at)}</span>
-            <span>{data.assignee}</span>
-            <span className="mono text-xs">{data.dataset_label} (synthetic)</span>
-          </p>
-        </div>
-        {can("reports.write") && (
-          <Button onClick={exportReport} busy={exporting} disabled={running}>
-            <FileDown size={15} aria-hidden /> Export report
-          </Button>
-        )}
-      </header>
-
-      {data.error && <div className="mt-5"><ErrorNote message={`This investigation stopped: ${data.error}`} /></div>}
-
-      <section aria-labelledby="claim-heading" className="grid gap-8 py-9 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        <div>
-          <p id="claim-heading" className="label mb-3">Claim under review</p>
-          <blockquote className="text-[30px] font-light leading-[1.22] tracking-[-0.022em]">{data.claim}</blockquote>
-          {data.compiled_claim.interpretation && <p className="mt-4 max-w-2xl text-sm text-dim">{data.compiled_claim.interpretation}</p>}
-        </div>
-        <div className="lg:border-l lg:border-line lg:pl-8">
-          <p className="label mb-3">Current assessment</p>
-          {running ? (
-            <p className="flex items-center gap-2 text-sm text-dim"><Loader2 size={14} className="animate-spin" aria-hidden /> Evaluating evidence</p>
-          ) : (
-            <>
-              <AssessmentMark value={data.assessment} large />
-              <p className="mt-3 text-sm text-dim">{data.assessment_rationale}</p>
-            </>
-          )}
-        </div>
-      </section>
-
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_268px]">
-        <div className="min-w-0 space-y-12">
-          <Ledger ledger={data.ledger} />
-
-          {data.realities.length > 0 && (
-            <section>
-              <SectionHeader label="Counterfactual audit" title="Competing realities" description="Each reality predicts what the evidence should show. Only observations can separate them." />
-              <CompetingRealities investigation={data} />
-            </section>
-          )}
-
-          <section>
-            <SectionHeader id="discovered" label="Analysis" title="What NULL discovered" />
-            {data.findings.length ? (
-              <ul className="divide-y divide-line border-y border-line">
-                {data.findings.map((finding) => (
-                  <li key={finding.id} className="grid gap-x-6 gap-y-1 py-4 md:grid-cols-[150px_minmax(0,1fr)]">
-                    <p className="flex items-center gap-2 self-start text-xs text-dim">
-                      <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${SEVERITY_DOT[finding.severity]}`} />
-                      {KINDS[finding.kind] ?? sentence(finding.kind)}
-                    </p>
-                    <div>
-                      <h3 className="text-[15px]">
-                        {finding.title}
-                        <span className="sr-only"> Severity {finding.severity}.</span>
-                      </h3>
-                      <p className="mt-1 text-[13px] text-dim">{finding.body}</p>
-                      {finding.evidence_refs.length > 0 && <p className="mono mt-1.5 text-[11px] text-mute">{finding.evidence_refs.join("  ")}</p>}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-dim">{running ? "Analysis in progress." : "No weaknesses were identified in the evidence examined."}</p>
-            )}
-          </section>
-
-          <section>
-            <SectionHeader id="recommended" label="Next step" title="Recommended investigation" />
-            <RecommendedInvestigation investigation={data} onChanged={refreshAfterDecision} />
-          </section>
-
-          <section>
-            <SectionHeader label="Traceability" title="Evidence analysis" description="Every item names the tool that produced it and the records it rests on. Select an ID to inspect it." />
-            {data.evidence.length ? (
-              <EvidenceTable evidence={data.evidence} investigationId={data.id} />
-            ) : (
-              <p className="text-sm text-dim">{running ? "Collecting evidence." : "No evidence was collected."}</p>
-            )}
-          </section>
-
-          <section>
-            <SectionHeader label="Conclusion" title="Investigation conclusion" />
-            <Conclusion investigation={data} />
-          </section>
-
-          {data.remediations.length > 0 && (
-            <section>
-              <SectionHeader label="Mitigate" title="Corrective actions" action={<Link href="/assurance#mitigation" className="text-[13px] text-dim underline decoration-line underline-offset-4 hover:text-fg">Manage in Assurance</Link>} />
-              <ul className="divide-y divide-line border-y border-line">
-                {data.remediations.map((remediation) => (
-                  <li key={remediation.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-[13px]">
-                    <span className="min-w-0 flex-1"><span className="mono mr-3 text-xs text-mute">{remediation.ref}</span><span className="text-dim">{remediation.action}</span></span>
-                    <Tag tone={remediation.verification_status === "verified" ? "ok" : "neutral"}>{remediation.verification_status.replace("_", " ")}</Tag>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </div>
-
-        <aside className="max-lg:order-first">
-          <div className="space-y-8 lg:sticky lg:top-6">
-            <section aria-label="Investigation timeline">
-              <p className="label mb-4">Investigation timeline</p>
-              <Timeline items={data.timeline} />
-            </section>
-            <section className="border-t border-line pt-5">
-              <ToolHistory executions={data.tool_executions} />
-            </section>
-            <section className="border-t border-line pt-5">
-              <p className="label mb-1.5">Reasoning</p>
-              <p className="flex items-start gap-2 text-xs text-dim">
-                <CircleDashed size={13} className="mt-0.5 shrink-0" aria-hidden />
-                {data.reasoning_note || "Not started"}
-              </p>
-              {data.explorer_notes.length > 0 && (
-                <details className="mt-2 text-xs text-dim">
-                  <summary className="cursor-pointer transition-colors hover:text-fg">Explorer notes ({data.explorer_notes.length})</summary>
-                  <ul className="mt-2 space-y-2">
-                    {data.explorer_notes.map((note) => (
-                      <li key={note.text}>
-                        {note.text}
-                        {note.evidence_refs.length > 0 && <span className="mono ml-1 text-[11px] text-mute">{note.evidence_refs.join(" ")}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </section>
+        <header className="flex flex-wrap items-start justify-between gap-x-8 gap-y-3">
+          <div className="min-w-0 flex-1 basis-96">
+            <h1 className="text-[15px] leading-tight">{data.name}</h1>
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-dim">
+              <span className="mono text-xs">{data.ref}</span>
+              <StatusText status={data.status} />
+              <span>Updated {ago(data.updated_at)}</span>
+              <span>{data.lifecycle.completed} of 7 stages complete</span>
+              <span className="mono text-xs">{data.dataset_label} (synthetic)</span>
+            </p>
           </div>
-        </aside>
-      </div>
-    </main>
+          <div className="flex flex-wrap gap-2">
+            <Link href={`/network#${data.id}`} className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3.5 text-sm font-medium transition-colors hover:bg-raised">
+              <Waypoints size={15} aria-hidden /> Evidence network
+            </Link>
+            {can("reports.write") && (
+              <Button onClick={exportReport} busy={exporting} disabled={running}>
+                <FileDown size={15} aria-hidden /> Export report
+              </Button>
+            )}
+          </div>
+        </header>
+
+        {data.error && <div className="mt-4"><ErrorNote message={`This investigation stopped: ${data.error}`} /></div>}
+
+        <section aria-labelledby="claim-heading" className="grid gap-x-10 gap-y-4 py-7 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div>
+            <p id="claim-heading" className="label mb-2.5">Claim under review</p>
+            <blockquote className="text-[30px] font-light leading-[1.2] tracking-[-0.022em] max-sm:text-[24px]">{data.claim}</blockquote>
+          </div>
+          <div className="lg:border-l lg:border-line lg:pl-8">
+            <p className="label mb-2.5">Current assessment</p>
+            {running ? (
+              <p className="flex items-center gap-2 text-sm text-dim"><Loader2 size={14} className="animate-spin" aria-hidden /> Evaluating evidence</p>
+            ) : (
+              <AssessmentMark value={data.assessment} large />
+            )}
+            {data.status !== "concluded" && !running && <p className="mt-1.5 text-xs text-mute">Provisional until the investigation concludes.</p>}
+          </div>
+        </section>
+
+        <Summary investigation={data} busy={exporting} canReport={can("reports.write")} onAct={() => (next.kind === "report" ? exportReport() : select(next.stage))} />
+
+        <div className="mt-2 border-b border-line">
+          <StageRail stages={data.lifecycle.stages} active={stage} onSelect={select} />
+        </div>
+
+        <div key={stage} className="rise py-9">
+          {stage === "claim" && <ClaimStage investigation={data} />}
+          {stage === "evidence" && <EvidenceStage investigation={data} exhibits={exhibits} loading={exhibitsLoading} />}
+          {stage === "explanations" && (
+            <section>
+              <StageHeading title="Competing realities" />
+              {data.realities.length ? <CompetingRealities investigation={data} /> : <p className="text-sm text-dim">{running ? "Explanations are being constructed." : "This claim has no competing explanations."}</p>}
+            </section>
+          )}
+          {stage === "tests" && (
+            <section>
+              <StageHeading title="Tests" />
+              <RecommendedInvestigation investigation={data} exhibits={exhibits} onChanged={refreshAfterDecision} />
+            </section>
+          )}
+          {stage === "findings" && <FindingsStage investigation={data} />}
+          {stage === "actions" && <ActionsStage investigation={data} onChanged={reload} />}
+          {stage === "verification" && <VerificationStage investigation={data} onChanged={reload} />}
+        </div>
+
+        <AdvancedAnalysis investigation={data} exhibits={exhibits} />
+      </main>
+    </EvidenceProvider>
   );
 }

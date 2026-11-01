@@ -1,4 +1,7 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -23,6 +26,7 @@ class ModifyBody(BaseModel):
     action: str | None = Field(default=None, min_length=4, max_length=2000)
     priority: str | None = Field(default=None, pattern="^(critical|high|medium|low)$")
     owner_id: str | None = None
+    target_date: date | None = None
 
 
 class ExecuteBody(BaseModel):
@@ -126,7 +130,8 @@ def modify(
     remediation = get_remediation(db, user, remediation_id)
     if remediation.execution_status == "executed":
         raise HTTPException(409, "An executed action can't be modified")
-    changes = body.model_dump(exclude_none=True)
+    # Only a target date can be cleared. An action always keeps a description, priority and owner.
+    changes = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k == "target_date"}
     if "owner_id" in changes:
         owner = db.get(User, changes["owner_id"])
         if owner is None or owner.workspace_id != user.workspace_id:
@@ -136,7 +141,7 @@ def modify(
     # Changing what an approval covered voids that approval.
     if "action" in changes and remediation.approval_status == "approved":
         remediation.approval_status = "pending"
-    audit(db, user, user.workspace_id, "remediation.modified", remediation.ref, changes, request)
+    audit(db, user, user.workspace_id, "remediation.modified", remediation.ref, jsonable_encoder(changes), request)
     db.commit()
     db.refresh(remediation)
     return _out(db, remediation)
@@ -188,15 +193,12 @@ def verify(
         run = run_verification(db, remediation, investigation.dataset, user)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    audit(
-        db,
-        user,
-        user.workspace_id,
-        "remediation.verified",
-        remediation.ref,
-        {"passed": run.passed, "summary": run.summary},
-        request,
+    action = (
+        "remediation.verified"
+        if run.passed
+        else ("remediation.recurrence_detected" if run.recurrence else "remediation.verification_failed")
     )
+    audit(db, user, user.workspace_id, action, remediation.ref, {"passed": run.passed, "summary": run.summary}, request)
     _touch_graph(db, remediation)
     db.commit()
     return _out(db, remediation)

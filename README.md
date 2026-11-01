@@ -28,10 +28,12 @@ No local PostgreSQL? Run `docker compose up -d` and set
 
 ## The demonstration
 
+Every investigation moves through seven stages: Claim, Evidence, Explanations, Tests, Findings, Actions, Verification.
+
 1. Open **Security claim analysis** from Overview. Its claim is UNDERDETERMINED: EDR is silent, but 4 hosts aren't enrolled.
-2. In **Competing realities**, see which observations would separate the explanations.
-3. Select **Review Investigation**, then approve. Independent logs expose an unexplained logon and the claim becomes
-   CONTRADICTED. Reveal the answer key to compare.
+2. Open **Evidence** to see the coverage matrix, then **Explanations** to see which observations would separate them.
+3. In **Tests**, select **Review Investigation**, then approve. Independent logs expose an unexplained logon and the claim
+   becomes CONTRADICTED. In **Findings**, reveal the answer key to compare.
 4. Open **Assurance**. Approve, execute and verify the agent enrollment. The first verification fails because one host
    never reported, so the action stays unresolved. Execute again and it passes.
 5. Select **Simulate recurrence** and verify again to see the weakness caught.
@@ -64,6 +66,15 @@ raw records → analysis tools → observations → validator → assessment
 - **Information value** is the mutual information between a check's outcome and the surviving realities, in bits. It uses
   a uniform prior and declared likelihoods, so it ranks checks and is not a probability of intrusion.
 - **Remediations** (`services/remediation.py`) resolve only when a procedure finds the evidence in the records.
+- **Lifecycle** (`services/lifecycle.py`) reads each stage's status, the key finding and the next action from stored rows.
+- **Exhibits** (`services/exhibits.py`) compute charts from raw records through the same scoped reader as the engine. A
+  restricted source stays closed in every chart until an approved test has read it.
+
+### Reports
+
+A report is an immutable, hashed snapshot in nine sections, numbered per investigation as version 1, 2, and so on. The PDF
+(`services/report_pdf.py`) draws its exhibits as vectors from that snapshot alone, so it never reflects later changes.
+Reports made before this structure still open, and sections they never captured say so.
 
 The engine has no access to `dataset_ground_truth`, and a test enforces this.
 
@@ -97,6 +108,7 @@ backend/app/reasoning   Provider interface, Meta client, rule-based roles
 backend/app/services    Orchestration, graph, remediation, reports
 backend/app/api         FastAPI routers
 backend/app/demo        Synthetic data and seed
+backend/app/assets      Geist fonts for PDF export (SIL Open Font License)
 frontend/src/app        Next.js pages
 frontend/scripts        Logo generator (writes public/brand)
 ```

@@ -3,9 +3,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_workspace
-from app.api.serializers import investigation_summary
+from app.api.serializers import investigation_card, investigation_summary
 from app.db import get_db
-from app.models import Finding, Investigation, RecommendedCheck, Remediation, User
+from app.models import Finding, Investigation, RecommendedCheck, Remediation, User, VerificationRun
 from app.security import require
 from app.services.assurance import preventive_scan
 
@@ -85,17 +85,45 @@ def overview(db: Session = Depends(get_db), user: User = Depends(require("invest
                 "failed": "failed verification",
                 "recurred": "has recurred",
             }[remediation.verification_status]
+            # A fix that failed or came back outranks everything still merely open.
+            regressed = remediation.verification_status != "awaiting"
             attention.append(
                 {
-                    "kind": "remediation",
-                    "severity": "high",
+                    "kind": "regression" if regressed else "remediation",
+                    "severity": "critical" if regressed else "high",
                     "title": f"{remediation.ref} {label}",
                     "detail": remediation.action,
                     "href": "/assurance#mitigation",
                 }
             )
     order = {"critical": 0, "high": 1, "medium": 2}
-    attention.sort(key=lambda a: order.get(a["severity"], 3))
+    attention.sort(key=lambda a: (a["kind"] != "regression", order.get(a["severity"], 3)))
+
+    # An investigation stays active until nothing about it is waiting on a person.
+    unresolved = {r.investigation_id for r in open_actions}
+    active = [i for i in investigations if i.status in OPEN_STATES or i.id in unresolved]
+    passed: dict[str, VerificationRun] = {}
+    if verified:
+        for run in db.scalars(
+            select(VerificationRun)
+            .where(VerificationRun.remediation_id.in_([r.id for r in verified]), VerificationRun.passed)
+            .order_by(VerificationRun.created_at)
+        ):
+            passed[run.remediation_id] = run
+    resolved = [
+        {
+            "ref": r.ref,
+            "action": r.action,
+            "finding": r.finding,
+            "investigation_id": r.investigation_id,
+            "investigation_ref": by_id[r.investigation_id].ref,
+            "verified_at": passed[r.id].created_at if r.id in passed else None,
+            "summary": passed[r.id].summary if r.id in passed else "",
+        }
+        for r in verified
+    ]
+    resolved.sort(key=lambda r: r["verified_at"] or r["ref"], reverse=True)
+    concluded = [i for i in investigations if i.status == "concluded" and i.id not in unresolved]
 
     return {
         "metrics": {
@@ -124,5 +152,8 @@ def overview(db: Session = Depends(get_db), user: User = Depends(require("invest
             },
         },
         "recent": [{**investigation_summary(i), "conclusion": i.assessment_rationale} for i in investigations[:6]],
-        "attention": attention[:8],
+        "active": [investigation_card(db, i) for i in active[:6]],
+        "resolved": resolved[:6],
+        "concluded": [investigation_card(db, i) for i in concluded[:4]],
+        "attention": attention,
     }

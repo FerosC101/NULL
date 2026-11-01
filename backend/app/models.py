@@ -1,6 +1,6 @@
 """Persistent state. Records of what was observed are kept apart from what NULL inferred."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -256,6 +257,7 @@ class Remediation(Base):
     priority: Mapped[str] = mapped_column(String(20))
     risk_addressed: Mapped[str] = mapped_column(Text)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     approval_status: Mapped[str] = mapped_column(String(20), default="pending")
     execution_status: Mapped[str] = mapped_column(String(20), default="not_started")
     verification_status: Mapped[str] = mapped_column(String(20), default="not_verified")
@@ -325,6 +327,7 @@ class Report(Base):
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"))
     investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
     ref: Mapped[str] = mapped_column(String(20), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     snapshot: Mapped[dict[str, Any]] = mapped_column(Json)
     sha256: Mapped[str] = mapped_column(String(64))
     created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))

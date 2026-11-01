@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.analysis.claims import compile_claim
 from app.api.deps import get_investigation, get_workspace
-from app.api.serializers import investigation_detail, investigation_summary, raw_records
+from app.api.serializers import investigation_card, investigation_detail, raw_records
 from app.db import get_db
 from app.demo.generator import DATASETS, WINDOW_END
 from app.demo.seed import next_ref
 from app.models import DataSource, EvidenceItem, GroundTruth, Investigation, RecommendedCheck, User, utcnow
 from app.security import audit, require
+from app.services import exhibits
 from app.services.orchestrator import analyze, create_timeline, execute_checks, in_background
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
@@ -118,7 +119,7 @@ def list_investigations(
     if until:
         query = query.where(Investigation.created_at <= until)
     rows = db.scalars(query.order_by(Investigation.updated_at.desc())).all()
-    return [investigation_summary(i) for i in rows]
+    return [investigation_card(db, i) for i in rows]
 
 
 @router.post("", status_code=201)
@@ -168,6 +169,15 @@ def get_detail(
     user: User = Depends(require("investigations.read")),
 ):
     return investigation_detail(db, get_investigation(db, user, investigation_id))
+
+
+@router.get("/{investigation_id}/exhibits")
+def get_exhibits(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require("investigations.read")),
+):
+    return exhibits.compute(db, get_investigation(db, user, investigation_id))
 
 
 @router.get("/{investigation_id}/evidence/{ref}")

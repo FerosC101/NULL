@@ -11,6 +11,7 @@ from app.demo.generator import DATASETS
 from app.models import DataSource, EvidenceRecord, User, utcnow
 from app.security import audit, require
 from app.services.assurance import preventive_scan
+from app.services.exhibits import workspace_matrix
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -60,6 +61,12 @@ def list_sources(db: Session = Depends(get_db), user: User = Depends(require("in
         "datasets": [{"key": k, "label": v["label"]} for k, v in DATASETS.items()],
         "sources": out,
     }
+
+
+@router.get("/coverage")
+def source_coverage(db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))):
+    workspace = get_workspace(db, user)
+    return workspace_matrix(db, user.workspace_id, (workspace.settings or {}).get("active_dataset", "A"))
 
 
 @router.post("/snapshot")

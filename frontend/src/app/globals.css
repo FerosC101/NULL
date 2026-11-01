@@ -162,18 +162,37 @@ dialog[data-drawer] {
 }
 
 @media print {
+  /* Tokens flip for paper, so charts keep their marks instead of losing their fills. */
+  :root {
+    --color-void: #ffffff;
+    --color-base: #ffffff;
+    --color-surface: #f5f5f5;
+    --color-raised: #e8e8e8;
+    --color-line: #d4d4d4;
+    --color-fg: #111111;
+    --color-dim: #4a4a4a;
+    --color-mute: #6b6b6b;
+    --color-ok: #2f8f62;
+    --color-warn: #a87a26;
+    --color-bad: #b84a4a;
+  }
   html,
   body {
     background: #fff !important;
     color: #111 !important;
+    color-scheme: light;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
   .no-print {
     display: none !important;
   }
-  .print-sheet,
-  .print-sheet * {
-    color: #111 !important;
-    border-color: #ccc !important;
-    background: transparent !important;
+  .print-sheet section {
+    break-inside: auto;
+  }
+  .print-sheet figure,
+  .print-sheet li,
+  .print-sheet tr {
+    break-inside: avoid;
   }
 }

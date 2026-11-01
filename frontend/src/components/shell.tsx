@@ -22,12 +22,17 @@ import { ErrorNote, Loading, ToastProvider } from "./ui";
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/investigations", label: "Investigations", icon: Search },
-  { href: "/network", label: "Evidence Network", icon: Waypoints },
   { href: "/assurance", label: "Assurance", icon: ShieldCheck },
+  { href: "/sources", label: "Sources", icon: Database },
+];
+
+const SECONDARY_NAV = [
   { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/sources", label: "Data Sources", icon: Database },
+  { href: "/network", label: "Evidence Network", icon: Waypoints },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+const isActive = (pathname: string, href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
 const SessionContext = createContext<(Me & { can: (permission: string) => boolean }) | null>(null);
 
@@ -93,30 +98,50 @@ function Sidebar({ me }: { me: Me }) {
     router.push("/login");
   }
   return (
-    <aside className="sticky top-0 flex h-dvh w-[232px] shrink-0 flex-col border-r border-line bg-void px-3 py-5 max-lg:hidden">
+    <aside className="no-print sticky top-0 flex h-dvh w-[232px] shrink-0 flex-col border-r border-line bg-void px-3 py-5 max-lg:hidden">
       <Link href="/" className="mb-6 block px-2" aria-label="NULL home">
         <Logo size={24} />
       </Link>
       <div className="mb-5 px-0.5">
         <WorkspaceSelector name={me.workspace.name} />
       </div>
-      <nav aria-label="Main" className="flex-1 space-y-0.5">
-        {NAV.map(({ href, label, icon: Icon }) => {
-          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-sm transition-colors ${
-                active ? "bg-raised text-fg" : "text-dim hover:text-fg"
-              }`}
-            >
-              <Icon size={15} strokeWidth={1.6} aria-hidden />
-              {label}
-            </Link>
-          );
-        })}
+      <nav aria-label="Main" className="flex flex-1 flex-col">
+        <div className="space-y-0.5">
+          {NAV.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-sm transition-colors ${
+                  active ? "bg-raised text-fg" : "text-dim hover:text-fg"
+                }`}
+              >
+                <Icon size={15} strokeWidth={1.6} aria-hidden />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="mt-auto space-y-0.5 pb-2">
+          {SECONDARY_NAV.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2.5 rounded-md px-2.5 py-[5px] text-[13px] transition-colors ${
+                  active ? "bg-raised text-fg" : "text-mute hover:text-fg"
+                }`}
+              >
+                <Icon size={14} strokeWidth={1.6} aria-hidden />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
       <ConnectionStatus me={me} />
       <div className="mt-2 flex items-center gap-2.5 border-t border-line px-2 pt-3">
@@ -138,9 +163,9 @@ function Sidebar({ me }: { me: Me }) {
 function CompactNav() {
   const pathname = usePathname();
   return (
-    <nav aria-label="Main" className="sticky top-0 z-20 flex gap-1 overflow-x-auto border-b border-line bg-void px-3 py-2 lg:hidden">
-      {NAV.map(({ href, label }) => {
-        const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+    <nav aria-label="Main" className="no-print sticky top-0 z-20 flex gap-1 overflow-x-auto border-b border-line bg-void px-3 py-2 lg:hidden">
+      {[...NAV, ...SECONDARY_NAV].map(({ href, label }) => {
+        const active = isActive(pathname, href);
         return (
           <Link key={href} href={href} className={`whitespace-nowrap rounded-md px-2.5 py-1 text-[13px] ${active ? "bg-raised text-fg" : "text-dim"}`}>
             {label}

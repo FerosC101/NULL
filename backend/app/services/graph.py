@@ -7,12 +7,17 @@ from app.models import (
     Assumption,
     DataSource,
     EvidenceItem,
+    Finding,
     GraphEdge,
     GraphNode,
     Hypothesis,
     Investigation,
+    RecommendedCheck,
     Remediation,
 )
+
+# Raised when the graph gains node kinds, so older investigations are rebuilt the next time they're opened.
+GRAPH_VERSION = 2
 
 # Which assumption each remediation addresses.
 REMEDIATION_RESOLVES = {
@@ -22,6 +27,13 @@ REMEDIATION_RESOLVES = {
     "contain_credential": "idp_is_chokepoint",
     "enforce_mfa": "idp_is_chokepoint",
 }
+
+
+def ensure_current(db: Session, investigation: Investigation) -> None:
+    current = db.get(GraphNode, f"inv:{investigation.id}")
+    if current is not None and current.data.get("graph_version") != GRAPH_VERSION:
+        rebuild_graph(db, investigation)
+        db.commit()
 
 
 def rebuild_graph(db: Session, investigation: Investigation) -> None:
@@ -74,6 +86,7 @@ def rebuild_graph(db: Session, investigation: Investigation) -> None:
         f"{investigation.ref} {investigation.name}",
         status=investigation.status,
         assessment=investigation.assessment,
+        graph_version=GRAPH_VERSION,
     )
     claim_node = node(f"claim:{prefix}", "claim", investigation.claim_text, assessment=investigation.assessment)
     db.flush()
@@ -155,6 +168,27 @@ def rebuild_graph(db: Session, investigation: Investigation) -> None:
             if ref and assumption.status in ("held", "violated"):
                 relation = "supports" if assumption.status == "held" else "contradicts"
                 edge(f"ev:{prefix}:{ref}", f"as:{prefix}:{key}", relation, assumption.basis)
+    checks = db.scalars(select(RecommendedCheck).where(RecommendedCheck.investigation_id == investigation.id)).all()
+    labels = {h.label for h in hypotheses}
+    for check in checks:
+        test_node = node(f"te:{check.id}", "test", check.title, status=check.status)
+        db.flush()
+        for label in check.distinguishes:
+            if label in labels:
+                edge(test_node, f"hy:{prefix}:{label}", "distinguishes", check.rationale)
+        for item in evidence:
+            if item.provenance.get("tool") == check.tool:
+                edge(f"ev:{prefix}:{item.ref}", test_node, "derived_from", "This test produced the observation.")
+    findings = db.scalars(select(Finding).where(Finding.investigation_id == investigation.id)).all()
+    finding_nodes: dict[str, str] = {}
+    for finding in findings:
+        finding_node = node(f"fi:{prefix}:{finding.key}", "finding", finding.title, severity=finding.severity)
+        finding_nodes[finding.title] = finding_node
+        db.flush()
+        edge(finding_node, claim_node, "challenges", finding.body)
+        for ref in finding.evidence_refs:
+            if ref in by_ref:
+                edge(f"ev:{prefix}:{ref}", finding_node, "supports", "The finding cites this observation.")
     remediations = db.scalars(select(Remediation).where(Remediation.investigation_id == investigation.id)).all()
     for remediation in remediations:
         rem_node = node(
@@ -165,6 +199,8 @@ def rebuild_graph(db: Session, investigation: Investigation) -> None:
             verification=remediation.verification_status,
         )
         db.flush()
+        if remediation.finding in finding_nodes:
+            edge(rem_node, finding_nodes[remediation.finding], "resolves", remediation.verification_criteria)
         target = REMEDIATION_RESOLVES.get(remediation.key)
         if target and target in assumptions:
             edge(rem_node, f"as:{prefix}:{target}", "resolves", remediation.verification_criteria)

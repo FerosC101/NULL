@@ -99,8 +99,8 @@ def edr_high_severity(reader: EvidenceReader, start, end) -> ObservableResult:
     )
 
 
-def idp_auth_anomaly(reader: EvidenceReader, start, end) -> ObservableResult:
-    frame = reader.frame("idp_auth")
+def failure_profile(frame: pd.DataFrame, start, end) -> dict:
+    """Hourly failed sign-ins against the same hour-of-day baseline, with the hours that exceed it."""
     failures = frame[frame["result"] == "failure"]
     baseline = failures[failures["ts"] < start]
     current = _window(failures, start, end)
@@ -108,12 +108,17 @@ def idp_auth_anomaly(reader: EvidenceReader, start, end) -> ObservableResult:
     rate_by_hour = baseline.groupby(baseline["ts"].dt.hour).size() / (baseline_hours / 24)
     counts = current.groupby(current["ts"].dt.floor("h")).size()
     tested = pd.date_range(start, end, freq="h", inclusive="left")
-    pvalues = []
-    for hour in tested:
-        rate = max(float(rate_by_hour.get(hour.hour, 0.5)), 0.5)
-        pvalues.append(float(stats.poisson.sf(int(counts.get(hour, 0)) - 1, rate)))
+    rates = [max(float(rate_by_hour.get(hour.hour, 0.5)), 0.5) for hour in tested]
+    observed = [int(counts.get(hour, 0)) for hour in tested]
+    pvalues = [float(stats.poisson.sf(c - 1, r)) for c, r in zip(observed, rates, strict=True)]
     rejected = multipletests(pvalues, alpha=ALPHA, method="fdr_bh")[0]
-    flagged = [tested[i].isoformat() for i, r in enumerate(rejected) if r]
+    return {"hours": tested, "observed": observed, "expected": rates, "rejected": rejected, "current": current}
+
+
+def idp_auth_anomaly(reader: EvidenceReader, start, end) -> ObservableResult:
+    profile = failure_profile(reader.frame("idp_auth"), start, end)
+    tested, current = profile["hours"], profile["current"]
+    flagged = [tested[i].isoformat() for i, r in enumerate(profile["rejected"]) if r]
     return ObservableResult(
         key="idp_auth_anomaly",
         state="positive" if flagged else "zero",
@@ -421,7 +426,7 @@ def host_egress_test(reader: EvidenceReader, start, end) -> ObservableResult:
     if remaining:
         top = stats_by_host[remaining[0]]
         summary += (
-            f": {remaining[0]} peaked at {top['peak_bytes'] / 1e9:.1f} GB in an hour against a "
+            f": {remaining[0]} moved {top['peak_bytes'] / 1e9:.1f} GB in its most anomalous hour against a "
             f"{top['baseline_median_bytes'] / 1e6:.0f} MB median"
         )
     summary += "."

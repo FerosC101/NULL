@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.analysis.observables import OBSERVABLE_LABELS
+from app.analysis.observables import OBSERVABLE_LABELS, TOOLS
 from app.config import get_settings
 from app.demo.generator import DATASETS
 from app.models import (
@@ -21,6 +21,7 @@ from app.models import (
     VerificationRun,
 )
 from app.security import ROLE_PERMISSIONS
+from app.services import lifecycle
 from app.services.orchestrator import STAGES
 
 STAGE_LABELS = dict(STAGES)
@@ -52,6 +53,17 @@ def investigation_summary(investigation: Investigation) -> dict:
         "assignee": investigation.assignee.name,
         "created_at": investigation.created_at,
         "updated_at": investigation.updated_at,
+    }
+
+
+def investigation_card(db: Session, investigation: Investigation) -> dict:
+    """A summary plus where the investigation stands, for lists."""
+    state = lifecycle.describe(db, investigation)
+    return {
+        **investigation_summary(investigation),
+        "stages": state["stages"],
+        "key_finding": state["key_finding"],
+        "next_action": state["next_action"],
     }
 
 
@@ -95,6 +107,7 @@ def check_out(c: RecommendedCheck, users: dict[str, User]) -> dict:
     return {
         "id": c.id,
         "tool": c.tool,
+        "observables": list(TOOLS[c.tool].observables) if c.tool in TOOLS else [],
         "title": c.title,
         "procedure": c.procedure,
         "rationale": c.rationale,
@@ -122,6 +135,7 @@ def remediation_out(r: Remediation, runs: list[VerificationRun] | None = None) -
         "priority": r.priority,
         "risk_addressed": r.risk_addressed,
         "owner": {"id": r.owner.id, "name": r.owner.name},
+        "target_date": r.target_date,
         "approval_status": r.approval_status,
         "execution_status": r.execution_status,
         "verification_status": r.verification_status,
@@ -153,6 +167,14 @@ def investigation_detail(db: Session, investigation: Investigation) -> dict:
     users = {u.id: u for u in db.scalars(select(User).where(User.workspace_id == investigation.workspace_id))}
     timeline = rows(TimelineEvent, TimelineEvent.position)
     remediations = rows(Remediation, Remediation.ref)
+    runs: dict[str, list[VerificationRun]] = {}
+    for run in db.scalars(
+        select(VerificationRun)
+        .where(VerificationRun.remediation_id.in_([r.id for r in remediations]))
+        .order_by(VerificationRun.created_at.desc())
+    ):
+        runs.setdefault(run.remediation_id, []).append(run)
+    loaded = lifecycle.load(db, investigation)
     ledger = {k: v for k, v in (investigation.ledger or {}).items() if not k.startswith("_")}
     return {
         **investigation_summary(investigation),
@@ -166,6 +188,8 @@ def investigation_detail(db: Session, investigation: Investigation) -> dict:
         "reasoning_mode": investigation.reasoning_mode,
         "reasoning_note": investigation.reasoning_note,
         "error": investigation.error,
+        "lifecycle": lifecycle.describe_rows(investigation, loaded),
+        "events": lifecycle.history(db, investigation, loaded, STAGE_LABELS),
         "timeline": [
             {
                 "stage": t.stage,
@@ -212,7 +236,7 @@ def investigation_detail(db: Session, investigation: Investigation) -> dict:
             }
             for t in rows(ToolExecution, ToolExecution.started_at)
         ],
-        "remediations": [remediation_out(r) for r in remediations],
+        "remediations": [remediation_out(r, runs.get(r.id, [])) for r in remediations],
     }
 
 
@@ -244,6 +268,7 @@ def report_summary(report: Report) -> dict:
     return {
         "id": report.id,
         "ref": report.ref,
+        "version": report.version,
         "investigation_id": report.investigation_id,
         "name": report.snapshot["investigation"]["name"],
         "investigation_ref": report.snapshot["investigation"]["ref"],

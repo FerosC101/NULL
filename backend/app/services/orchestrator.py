@@ -733,7 +733,9 @@ def execute_checks(db: Session, investigation_id: str, check_ids: list[str]) -> 
     db.commit()
     run.stage("verification_executed", "running")
     rows = db.scalars(
-        select(RecommendedCheck).where(RecommendedCheck.id.in_(check_ids), RecommendedCheck.status == "approved")
+        select(RecommendedCheck)
+        .where(RecommendedCheck.id.in_(check_ids), RecommendedCheck.status == "approved")
+        .order_by(RecommendedCheck.position)
     ).all()
     completed, failed = 0, 0
     for row in rows:

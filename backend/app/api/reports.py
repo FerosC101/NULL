@@ -8,7 +8,8 @@ from app.api.serializers import report_summary
 from app.db import get_db
 from app.models import Report, User
 from app.security import audit, require
-from app.services.reports import SECTION_TITLES, create_report, evidence_csv, render_pdf
+from app.services.report_pdf import render_pdf
+from app.services.reports import SECTION_TITLES, create_report, evidence_csv, normalize_snapshot, version_history
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -39,7 +40,12 @@ def generate(
 @router.get("/{report_id}")
 def read_report(report_id: str, db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))):
     report = get_report(db, user, report_id)
-    return {**report_summary(report), "snapshot": report.snapshot, "sections": SECTION_TITLES}
+    return {
+        **report_summary(report),
+        "snapshot": normalize_snapshot(report.snapshot),
+        "sections": SECTION_TITLES,
+        "versions": version_history(db, report),
+    }
 
 
 @router.get("/{report_id}/export.pdf")

@@ -12,6 +12,19 @@ export function utc(value: string | null | undefined): string {
   return `${dateTime.format(new Date(value))} UTC`;
 }
 
+const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+
+export const clock = (value: string) => clockTime.format(new Date(value));
+
+const calendarDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+export const day = (value: string) => calendarDay.format(new Date(value));
+
+export function bytes(value: number): string {
+  if (value >= 1e9) return `${(value / 1e9).toFixed(1)} GB`;
+  return `${Math.round(value / 1e6).toLocaleString()} MB`;
+}
+
 export function ago(value: string | null | undefined): string {
   if (!value) return "Never";
   const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
