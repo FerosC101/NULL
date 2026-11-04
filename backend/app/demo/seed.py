@@ -12,6 +12,7 @@ from app.db import SessionLocal, engine
 from app.demo.generator import DATASETS, WINDOW_END, WINDOW_START, generate
 from app.models import DataSource, GroundTruth, Investigation, RecommendedCheck, User, Workspace, utcnow
 from app.security import hash_password
+from app.services import refs
 from app.services.orchestrator import analyze, create_timeline, execute_checks
 from app.services.sources import ALL_SOURCE_KEYS, SOURCE_DEFINITIONS, UNCONNECTED_SOURCES
 
@@ -37,7 +38,7 @@ def load_records(db: Session) -> None:
 
 
 def next_ref(db: Session) -> str:
-    return f"INV-{(db.scalar(select(func.count(Investigation.id))) or 0) + 1:04d}"
+    return refs.next_ref(db, Investigation, "INV")
 
 
 def new_investigation(db, workspace, user, name, claim, dataset, objective, sources=None) -> Investigation:

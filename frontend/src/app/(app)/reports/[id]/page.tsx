@@ -8,7 +8,7 @@ import { ChartFrame, CoverageMatrix, HostCoverage, TimeChart, type TimePoint } f
 import { AssessmentMark, Button, ErrorNote, Field, Loading, Tag } from "@/components/ui";
 import { PredictionMatrix } from "@/components/workspace/realities";
 import { useApi } from "@/lib/api";
-import { bytes, sentence, utc } from "@/lib/format";
+import { bytes, dataClass, sentence, utc } from "@/lib/format";
 import type { Assessment, Exhibits, ReportSummary, StageView } from "@/lib/types";
 import { MiniRail } from "@/components/lifecycle";
 
@@ -146,7 +146,7 @@ export default function ReportPage() {
         <dl className="grid gap-4 sm:grid-cols-2">
           <Field label="Time period"><Mono>{period}</Mono></Field>
           <Field label="Assets">{s.scope.assets}</Field>
-          <Field label="Dataset">{s.scope.dataset} (synthetic)</Field>
+          <Field label="Dataset">{s.scope.dataset} ({dataClass(s.scope.data_class)})</Field>
           <Field label="Objective">{s.scope.objective || "Not stated"}</Field>
         </dl>
         <Text>{s.claim.interpretation}</Text>

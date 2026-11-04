@@ -1,6 +1,7 @@
 """Materializes each investigation's evidence graph into graph_nodes and graph_edges."""
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -45,13 +46,12 @@ def rebuild_graph(db: Session, investigation: Investigation) -> None:
 
     def node(node_id: str, kind: str, label: str, shared: bool = False, **data) -> str:
         if shared:
-            if db.get(GraphNode, node_id) is None:
-                db.add(
-                    GraphNode(
-                        id=node_id, workspace_id=workspace_id, investigation_id=None, kind=kind, label=label, data=data
-                    )
-                )
-                db.flush()
+            # Investigations share these nodes and can finish at the same moment.
+            db.execute(
+                insert(GraphNode)
+                .values(id=node_id, workspace_id=workspace_id, investigation_id=None, kind=kind, label=label, data=data)
+                .on_conflict_do_nothing(index_elements=[GraphNode.id])
+            )
         else:
             db.add(
                 GraphNode(

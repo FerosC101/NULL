@@ -1,9 +1,8 @@
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.analysis.observables import OBSERVABLE_LABELS, TOOLS
 from app.config import get_settings
-from app.demo.generator import DATASETS
 from app.models import (
     Assumption,
     DataSource,
@@ -22,6 +21,7 @@ from app.models import (
 )
 from app.security import ROLE_PERMISSIONS
 from app.services import lifecycle
+from app.services.datasets import DEMO, describe
 from app.services.orchestrator import STAGES
 
 STAGE_LABELS = dict(STAGES)
@@ -40,6 +40,7 @@ def user_out(user: User) -> dict:
 
 
 def investigation_summary(investigation: Investigation) -> dict:
+    dataset = describe(object_session(investigation), investigation.dataset)
     return {
         "id": investigation.id,
         "ref": investigation.ref,
@@ -48,7 +49,9 @@ def investigation_summary(investigation: Investigation) -> dict:
         "status": investigation.status,
         "assessment": investigation.assessment,
         "dataset": investigation.dataset,
-        "dataset_label": DATASETS.get(investigation.dataset, {}).get("label", investigation.dataset),
+        "dataset_label": dataset.label if dataset else investigation.dataset,
+        "dataset_origin": dataset.origin if dataset else DEMO,
+        "data_class": dataset.data_class if dataset else "synthetic",
         "source_keys": investigation.source_keys,
         "assignee": investigation.assignee.name,
         "created_at": investigation.created_at,
@@ -124,6 +127,9 @@ def check_out(c: RecommendedCheck, users: dict[str, User]) -> dict:
 
 
 def remediation_out(r: Remediation, runs: list[VerificationRun] | None = None) -> dict:
+    db = object_session(r)
+    dataset = describe(db, db.get(Investigation, r.investigation_id).dataset)
+    simulated = dataset is not None and dataset.origin == DEMO
     return {
         "id": r.id,
         "ref": r.ref,
@@ -143,7 +149,8 @@ def remediation_out(r: Remediation, runs: list[VerificationRun] | None = None) -
         "verification_procedure": r.verification_procedure,
         "attempts": r.attempts,
         "decision_note": r.decision_note,
-        "can_simulate_recurrence": r.key != "restore_sensor",
+        "can_execute": simulated,
+        "can_simulate_recurrence": simulated and r.key != "restore_sensor",
         "runs": [
             {
                 "id": v.id,

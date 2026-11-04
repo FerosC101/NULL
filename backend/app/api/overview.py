@@ -7,6 +7,7 @@ from app.api.serializers import investigation_card, investigation_summary
 from app.db import get_db
 from app.models import Finding, Investigation, RecommendedCheck, Remediation, User, VerificationRun
 from app.security import require
+from app.services import datasets
 from app.services.assurance import preventive_scan
 
 router = APIRouter(prefix="/overview", tags=["overview"])
@@ -18,7 +19,7 @@ SETTLED = ("SUPPORTED", "CONTRADICTED")
 @router.get("")
 def overview(db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))):
     workspace = get_workspace(db, user)
-    dataset = (workspace.settings or {}).get("active_dataset", "A")
+    dataset = datasets.active(db, workspace).key
     investigations = db.scalars(
         select(Investigation)
         .options(joinedload(Investigation.assignee))

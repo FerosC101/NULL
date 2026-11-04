@@ -123,6 +123,7 @@ const CLOSED_ROW: Record<string, string> = {
   disconnected: "Disconnected, not read",
   not_selected: "Not selected for this investigation",
   restricted: "Restricted. Not read until an approved test reads it",
+  empty: "This dataset has no records from this source",
 };
 
 const CELL_STYLE = { records: "bg-dim/70", none: "bg-raised", gap: "bg-bad" };

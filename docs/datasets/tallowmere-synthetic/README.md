@@ -49,14 +49,25 @@ On 2026-11-01 all 135,105 rows were mapped to NULL's records in a temporary data
 `answer-key/expected_outcomes.csv` was then run on each snapshot through NULL's real analysis, approving every proposed
 test.
 
-All 16 results matched the expected assessment on the first run, with no tuning. This used rule-based reasoning, not
-Muse Spark. The match shows the data behaves as designed. It does not measure accuracy on real logs, because the data
+With rule-based reasoning, all 16 results matched the expected assessment on the first run, with no tuning.
+
+The same claims were then uploaded through the API and run on `muse-spark-1.3`. All 16 stayed on the model with no
+fallback, and 13 matched. The other 3 are the MFA claim on F, G and H, which came back UNDERDETERMINED, not SUPPORTED:
+
+| Snapshot | Why | Assessment of the answer key |
+| --- | --- | --- |
+| H | The model proposed access outside the identity provider, and the evidence corroborated it | The model is right. The attacker's session never met MFA, so the key's SUPPORTED is too narrow |
+| G | The model proposed access outside fresh sign-ins, and one such session exists, under an approved change | Cautious. The session is explained |
+| F | The evidence went against the model's explanation, but it wasn't ruled out, because only a firm prediction failing rules one out | Over-cautious |
+
+The answer key is unchanged, so these show as mismatches. None of this measures accuracy on real logs, because the data
 was written with knowledge of the tests that read it.
 
 ## Using it
 
-NULL has no CSV import yet, so these files do not appear in the app. They are ready for that importer to be built and
-tested against.
+Upload a snapshot through **Sources > Upload evidence**, choosing "Test or synthetic data". Add `asset_register.csv` and
+every file in one snapshot folder. Each file should be recognized with no rejected rows. Keep `answer-key/` out of the
+upload.
 
 To rebuild the files, run this from the repository root:
 

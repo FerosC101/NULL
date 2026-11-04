@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const shots = process.env.NULL_SHOTS;
@@ -27,7 +27,7 @@ test("console stays clean across every page", async ({ page }) => {
     if (message.type() === "error") problems.push(`console: ${message.text()}`);
   });
   await signIn(page);
-  for (const path of ["/", "/investigations", "/investigations/new", "/network", "/assurance", "/reports", "/sources", "/settings"]) {
+  for (const path of ["/", "/investigations", "/investigations/new", "/network", "/assurance", "/reports", "/sources", "/sources/import", "/settings"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     await expect(page.locator("main")).toBeVisible();
@@ -168,7 +168,7 @@ test("a new investigation runs through the workflow", async ({ page }) => {
   await expect(page.getByText("How NULL reads this")).toBeVisible();
   await shot(page, "09-new-claim", false);
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Demo snapshot").selectOption("C");
+  await page.getByLabel("Dataset").selectOption("C");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByText("SaaS audit trail")).toBeVisible();
   await shot(page, "10-new-sources", false);
@@ -210,6 +210,64 @@ test("the evidence network is interactive", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Clear focus" })).toBeVisible();
 });
 
+test("exported logs can be uploaded and investigated", async ({ page }) => {
+  const data = join(__dirname, "../../docs/datasets/tallowmere-synthetic");
+  const snapshot = join(data, "snapshot-G");
+  await signIn(page);
+  await page.goto("/sources");
+  await page.getByRole("link", { name: "Upload evidence" }).click();
+  await page.getByLabel("Dataset name").fill("Tallowmere browser check");
+  await page.getByText("Test or synthetic data").click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("button", { name: "Choose CSV files" })).toBeVisible();
+  await shot(page, "upload-empty");
+  const files = readdirSync(snapshot).map((name) => join(snapshot, name));
+  await page.getByLabel("CSV files to upload").setInputFiles([join(data, "asset_register.csv"), ...files]);
+  await expect(page.getByText("20,160 of 20,160 rows readable")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/rows readable/)).toHaveCount(9);
+  await expect(page.getByText(/rejected:/)).toHaveCount(0);
+  await shot(page, "upload-files");
+  await page.getByRole("button", { name: "Add to evidence" }).click();
+  await expect(page.getByText("Added to evidence. These records can't be changed.")).toBeVisible({ timeout: 60_000 });
+  await shot(page, "upload-done");
+  await page.getByRole("button", { name: "Start an investigation" }).click();
+  await expect(page.getByRole("heading", { name: "What is being claimed?" })).toBeVisible();
+  await expect(page.getByText("SYNTHETIC UPLOAD")).toBeVisible();
+  await page.getByLabel("Claim").fill("MFA was enforced on every sign-in.");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("combobox", { name: "Dataset" })).toHaveValue(/^up-/);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Begin investigation" }).click();
+  await expect(page.getByText("Tallowmere browser check (synthetic)").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Reveal demo answer key" })).toHaveCount(0);
+  await page.goto("/sources");
+  await page.getByRole("combobox", { name: "Dataset" }).selectOption("A");
+  await expect(page.getByText("DEMONSTRATION WORKSPACE")).toBeVisible();
+});
+
+test("a file that can't be read is explained, not imported", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/sources/import");
+  await page.getByLabel("Dataset name").fill("Unreadable rows");
+  await page.getByText("Real logs").click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("CSV files to upload").setInputFiles({
+    name: "signins.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Date (UTC),Request ID,Username,Application,Status,MFA\n2026-03-02 10:00:00,r1,ana,erp,Success,true\n"),
+  });
+  await expect(page.getByText("0 of 1 rows readable")).toBeVisible();
+  await expect(page.getByText(/1 rejected: A timestamp has no time zone/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add to evidence" })).toBeDisabled();
+  await page.getByText("Columns and time zone").click();
+  await page.getByLabel("Time zone of unmarked times").selectOption("Asia/Manila");
+  await expect(page.getByText("1 of 1 rows readable")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add to evidence" })).toBeEnabled();
+  await page.getByRole("button", { name: "Discard upload" }).click();
+  await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible();
+});
+
 test("a viewer can read but not act", async ({ page }) => {
   await signIn(page, "mina@cobalt.example");
   await expect(page.getByRole("link", { name: "Start Investigation" })).toHaveCount(0);
@@ -230,7 +288,7 @@ test("dialogs work from the keyboard", async ({ page }) => {
 test("no page scrolls sideways at phone width", async ({ page }) => {
   await signIn(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const path of ["/", "/investigations", "/investigations/new", "/assurance", "/reports", "/sources", "/settings"]) {
+  for (const path of ["/", "/investigations", "/investigations/new", "/assurance", "/reports", "/sources", "/sources/import", "/settings"]) {
     await page.goto(path);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

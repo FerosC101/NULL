@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -95,6 +96,40 @@ class GroundTruth(Base):
 
     dataset: Mapped[str] = mapped_column(String(20), primary_key=True)
     truth: Mapped[dict[str, Any]] = mapped_column(Json)
+
+
+class Dataset(Base):
+    """An uploaded evidence set. The demo snapshots live in the generator and have no row here."""
+
+    __tablename__ = "datasets"
+
+    key: Mapped[str] = mapped_column(String(20), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"))
+    label: Mapped[str] = mapped_column(String(120))
+    data_class: Mapped[str] = mapped_column(String(20))  # real | synthetic
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | ready
+    window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary: Mapped[dict[str, Any]] = mapped_column(Json, default=dict)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ImportFile(Base):
+    """An uploaded file, kept exactly as received so any record can be traced back to its row."""
+
+    __tablename__ = "import_files"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    dataset_key: Mapped[str] = mapped_column(ForeignKey("datasets.key", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    mapping: Mapped[dict[str, Any]] = mapped_column(Json, default=dict)
+    timezone: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    report: Mapped[dict[str, Any]] = mapped_column(Json, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Investigation(Base):

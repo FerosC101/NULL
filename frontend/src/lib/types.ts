@@ -2,8 +2,18 @@ export type Assessment = "SUPPORTED" | "CONTRADICTED" | "PARTIALLY IDENTIFIED" |
 
 export interface Me {
   user: { id: string; email: string; name: string; title: string; role: string; permissions: string[] };
-  workspace: { id: string; name: string; is_demo: boolean; active_dataset: string };
+  workspace: { id: string; name: string; is_demo: boolean; active_dataset: string; dataset: DatasetInfo };
   ai: AiStatus;
+}
+
+export interface DatasetInfo {
+  key: string;
+  label: string;
+  origin: "demo" | "upload";
+  data_class: "real" | "synthetic";
+  window_start: string;
+  window_end: string;
+  allow_model: boolean;
 }
 
 export interface AiStatus {
@@ -26,6 +36,8 @@ export interface InvestigationSummary {
   assessment: Assessment;
   dataset: string;
   dataset_label: string;
+  dataset_origin: "demo" | "upload";
+  data_class: "real" | "synthetic";
   source_keys: string[];
   assignee: string;
   created_at: string;
@@ -91,7 +103,7 @@ export interface MatrixRow {
   key: string;
   label: string;
   source_key: string;
-  state: "readable" | "disconnected" | "not_selected" | "restricted";
+  state: "readable" | "disconnected" | "not_selected" | "restricted" | "empty";
   cadence_hours: number;
   records: number | null;
   cells: MatrixCell[];
@@ -263,6 +275,7 @@ export interface RemediationView {
   verification_procedure: string;
   attempts: number;
   decision_note: string;
+  can_execute: boolean;
   can_simulate_recurrence: boolean;
   runs: VerificationRunView[];
 }
@@ -368,8 +381,47 @@ export interface SourceView {
   coverage: string | null;
 }
 
+export interface ImportFileView {
+  id: string;
+  name: string;
+  size: number;
+  kind: string | null;
+  kind_label: string | null;
+  source: string | null;
+  mapping: Record<string, string>;
+  timezone: string | null;
+  columns: string[];
+  preview: Record<string, string>[];
+  total_rows: number;
+  accepted: number;
+  rejected: number;
+  reasons: { reason: string; count: number }[];
+  samples: { row: number; reason: string }[];
+  missing: string[];
+  notes: string[];
+  ready: boolean;
+}
+
+export interface ImportView {
+  key: string;
+  label: string;
+  data_class: "real" | "synthetic";
+  status: "draft" | "ready";
+  window_start: string | null;
+  window_end: string | null;
+  summary: { records?: Record<string, number>; total?: number; sessions_inferred?: number; missing_sources?: string[] };
+  created_at: string;
+  files: ImportFileView[];
+}
+
+export interface ImportOptions {
+  kinds: { key: string; label: string; source: string; columns: { name: string; label: string; required: boolean }[] }[];
+  max_bytes: number;
+}
+
 export interface InvestigationOptions {
-  datasets: { key: string; label: string }[];
+  active_dataset: string;
+  datasets: DatasetInfo[];
   windows: { hours: number; label: string }[];
   asset_classes: { key: string; label: string }[];
   sources: { key: string; name: string; status: string; mode: string; restricted: boolean }[];

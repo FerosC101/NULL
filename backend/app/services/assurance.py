@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.analysis.observables import active_coverage, collection_continuity
 from app.analysis.records import EvidenceReader, SourceUnavailable
-from app.demo.generator import WINDOW_END, WINDOW_START
 from app.models import Assumption, DataSource, Investigation
+from app.services.datasets import DEMO, describe, last_hours
 
 CURRENT_AGENT = "7.4.2"
 
@@ -16,6 +16,8 @@ def preventive_scan(db: Session, workspace_id: str, dataset: str) -> dict:
     connected = {s.key for s in sources if s.status == "connected"}
     disconnected = [{"key": s.key, "name": s.name} for s in sources if s.status != "connected"]
     reader = EvidenceReader(db, workspace_id, dataset, connected, None)
+    info = describe(db, dataset, workspace_id)
+    window_start, window_end = last_hours(info, 24)
     result: dict = {
         "dataset": dataset,
         "disconnected_sources": disconnected,
@@ -26,8 +28,7 @@ def preventive_scan(db: Session, workspace_id: str, dataset: str) -> dict:
     }
     try:
         coverage_frame = reader.frame("coverage")
-        latest_ts = coverage_frame["ts"].max().to_pydatetime() if len(coverage_frame) else WINDOW_END
-        state = active_coverage(reader, max(latest_ts, WINDOW_END))
+        state = active_coverage(reader, max(coverage_frame["ts"].max().to_pydatetime(), window_end))
         inventory = state["frame"]
         rows = []
         for asset_class, group in inventory.groupby("asset_class"):
@@ -50,7 +51,8 @@ def preventive_scan(db: Session, workspace_id: str, dataset: str) -> dict:
             "by_class": sorted(rows, key=lambda r: r["asset_class"]),
         }
         latest = coverage_frame.sort_values("ts").groupby("hostname").tail(1)
-        outdated = latest[latest["agent_version"] != CURRENT_AGENT]
+        # The demo's agent release is known. An upload doesn't say which version is current.
+        outdated = latest[latest["agent_version"] != CURRENT_AGENT] if info.origin == DEMO else []
         if len(outdated):
             result["emerging_risks"].append(
                 {
@@ -62,7 +64,7 @@ def preventive_scan(db: Session, workspace_id: str, dataset: str) -> dict:
     except SourceUnavailable as exc:
         result["unavailable"].append({"key": exc.source_key, "reason": exc.reason})
     try:
-        continuity = collection_continuity(reader, WINDOW_START, WINDOW_END)
+        continuity = collection_continuity(reader, window_start, window_end)
         for gap in continuity.details["gaps"]:
             result["collection_weaknesses"].append(
                 {"subnet": gap["subnet"], "missing_hours": len(gap["hours"]), "first": gap["hours"][0]}

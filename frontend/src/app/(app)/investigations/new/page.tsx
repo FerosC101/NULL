@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button, ErrorNote, Field, FormField, Loading, Tag } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
+import { dataClass, utc } from "@/lib/format";
 import type { InvestigationOptions } from "@/lib/types";
 
 const STEPS = ["Claim", "Scope", "Evidence", "Review"];
@@ -29,8 +30,11 @@ export default function NewInvestigationPage() {
   const [compiled, setCompiled] = useState<Compiled | null>(null);
   const [name, setName] = useState("");
   const [objective, setObjective] = useState("");
-  const [dataset, setDataset] = useState("A");
+  const [chosenDataset, setDataset] = useState<string | null>(null);
   const [hours, setHours] = useState(24);
+  const [custom, setCustom] = useState(false);
+  const [from, setFrom] = useState("");
+  const [until, setUntil] = useState("");
   const [assets, setAssets] = useState<string[]>([]);
   const [sources, setSources] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,7 +57,10 @@ export default function NewInvestigationPage() {
 
   const connected = options?.sources.filter((s) => s.status === "connected").map((s) => s.key) ?? [];
   const selected = sources ?? connected;
-  const canContinue = [claim.trim().length >= 8, name.trim().length >= 2, selected.length > 0, true][step];
+  const dataset = chosenDataset ?? options?.active_dataset ?? "A";
+  const datasetInfo = options?.datasets.find((d) => d.key === dataset);
+  const scopeReady = name.trim().length >= 2 && (!custom || (from !== "" && until !== ""));
+  const canContinue = [claim.trim().length >= 8, scopeReady, selected.length > 0, true][step];
 
   function toggle<T>(list: T[], value: T) {
     return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -68,8 +75,9 @@ export default function NewInvestigationPage() {
     setBusy(true);
     setError(null);
     try {
+      const period = custom ? { window_start: `${from}:00Z`, window_end: `${until}:00Z` } : { window_hours: hours };
       const created = await api<{ id: string }>("/investigations", {
-        body: { claim, name, objective, dataset, window_hours: hours, asset_classes: assets, source_keys: selected },
+        body: { claim, name, objective, dataset, ...period, asset_classes: assets, source_keys: selected },
       });
       router.push(`/investigations/${created.id}`);
     } catch (cause) {
@@ -81,7 +89,7 @@ export default function NewInvestigationPage() {
   if (loadError) return <main className="mx-auto max-w-2xl px-8 py-16"><ErrorNote message={loadError} /></main>;
   if (!options) return <main className="mx-auto max-w-2xl px-8 py-16"><Loading /></main>;
 
-  const windowLabel = options.windows.find((w) => w.hours === hours)?.label;
+  const windowLabel = custom ? `${from.replace("T", " ")} to ${until.replace("T", " ")} UTC` : options.windows.find((w) => w.hours === hours)?.label;
   const assetLabel = assets.length ? options.asset_classes.filter((a) => assets.includes(a.key)).map((a) => a.label).join(", ") : "All in-scope assets";
 
   return (
@@ -139,17 +147,31 @@ export default function NewInvestigationPage() {
               <input className="field" maxLength={200} value={name} onChange={(event) => setName(event.target.value)} />
             </FormField>
             <div className="grid gap-5 sm:grid-cols-2">
-              <FormField label="Time period">
-                <select className="field" value={hours} onChange={(event) => setHours(Number(event.target.value))}>
-                  {options.windows.map((option) => <option key={option.hours} value={option.hours}>{option.label}</option>)}
+              <FormField label="Dataset" hint={datasetInfo?.origin === "demo" ? "Each snapshot has a different hidden outcome." : "Uploaded files. There is no answer key."}>
+                <select className="field" value={dataset} onChange={(event) => setDataset(event.target.value)}>
+                  {options.datasets.map((option) => <option key={option.key} value={option.key}>{option.label} ({dataClass(option.data_class)})</option>)}
                 </select>
               </FormField>
-              <FormField label="Demo snapshot" hint="Each snapshot has a different hidden outcome.">
-                <select className="field" value={dataset} onChange={(event) => setDataset(event.target.value)}>
-                  {options.datasets.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+              <FormField label="Time period" hint={datasetInfo ? `Records run from ${utc(datasetInfo.window_start)} to ${utc(datasetInfo.window_end)}.` : undefined}>
+                <select className="field" value={custom ? "custom" : hours} onChange={(event) => {
+                  setCustom(event.target.value === "custom");
+                  if (event.target.value !== "custom") setHours(Number(event.target.value));
+                }}>
+                  {options.windows.map((option) => <option key={option.hours} value={option.hours}>{option.label}</option>)}
+                  <option value="custom">Custom period</option>
                 </select>
               </FormField>
             </div>
+            {custom && (
+              <div className="grid gap-5 sm:grid-cols-2">
+                <FormField label="From (UTC, on the hour)">
+                  <input type="datetime-local" step={3600} className="field" value={from} onChange={(event) => setFrom(event.target.value)} />
+                </FormField>
+                <FormField label="Until (UTC, on the hour)">
+                  <input type="datetime-local" step={3600} className="field" value={until} onChange={(event) => setUntil(event.target.value)} />
+                </FormField>
+              </div>
+            )}
             <fieldset>
               <legend className="mb-1.5 text-[13px] text-dim">Systems included</legend>
               <div className="flex flex-wrap gap-2">
@@ -200,7 +222,7 @@ export default function NewInvestigationPage() {
               <Field label="Name">{name}</Field>
               <Field label="Period">{windowLabel}</Field>
               <Field label="Systems">{assetLabel}</Field>
-              <Field label="Snapshot">{options.datasets.find((d) => d.key === dataset)?.label} (synthetic)</Field>
+              <Field label="Dataset">{datasetInfo?.label} ({dataClass(datasetInfo?.data_class)})</Field>
               <Field label="Sources">{options.sources.filter((s) => selected.includes(s.key)).map((s) => s.name).join(", ")}</Field>
               {objective && <Field label="Objective">{objective}</Field>}
             </dl>

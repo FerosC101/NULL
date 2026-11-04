@@ -10,7 +10,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.analysis.observables import OBSERVABLE_LABELS, TOOLS
-from app.demo.generator import DATASETS
 from app.models import (
     Assumption,
     DataSource,
@@ -26,7 +25,9 @@ from app.models import (
     VerificationRun,
 )
 from app.services import exhibits, lifecycle
+from app.services.datasets import DEMO, NOTICES, describe
 from app.services.orchestrator import STAGES
+from app.services.refs import next_ref
 
 SCHEMA = 2
 SECTION_TITLES = [
@@ -85,6 +86,7 @@ def _test_results(check: RecommendedCheck, hypotheses: list[Hypothesis], evidenc
 
 
 def build_snapshot(db: Session, investigation: Investigation) -> dict[str, Any]:
+    dataset = describe(db, investigation.dataset)
     iid = investigation.id
     evidence = db.scalars(
         select(EvidenceItem).where(EvidenceItem.investigation_id == iid).order_by(EvidenceItem.ref)
@@ -148,7 +150,7 @@ def build_snapshot(db: Session, investigation: Investigation) -> dict[str, Any]:
             "reasoning_mode": investigation.reasoning_mode,
             "reasoning_note": investigation.reasoning_note,
         },
-        "demo_notice": "Synthetic demonstration data for a fictional company. No real organization was examined.",
+        "demo_notice": dataset.notice if dataset else NOTICES[(DEMO, "synthetic")],
         "executive_summary": {
             "assessment": investigation.assessment,
             "rationale": investigation.assessment_rationale,
@@ -189,7 +191,8 @@ def build_snapshot(db: Session, investigation: Investigation) -> dict[str, Any]:
             "window_end": investigation.scope.get("window_end"),
             "assets": investigation.scope.get("assets_label", "All in-scope assets"),
             "objective": investigation.objective,
-            "dataset": DATASETS.get(investigation.dataset, {}).get("label", investigation.dataset),
+            "dataset": dataset.label if dataset else investigation.dataset,
+            "data_class": dataset.data_class if dataset else "synthetic",
         },
         "sources": [
             {
@@ -311,14 +314,13 @@ def build_snapshot(db: Session, investigation: Investigation) -> dict[str, Any]:
 
 
 def create_report(db: Session, investigation: Investigation, user: User) -> Report:
-    count = len(db.scalars(select(Report.id)).all())
     earlier = db.scalar(select(func.count()).select_from(Report).where(Report.investigation_id == investigation.id))
     snapshot = build_snapshot(db, investigation)
     digest = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
     report = Report(
         workspace_id=investigation.workspace_id,
         investigation_id=investigation.id,
-        ref=f"RPT-{count + 1:04d}",
+        ref=next_ref(db, Report, "RPT"),
         version=(earlier or 0) + 1,
         snapshot=snapshot,
         sha256=digest,

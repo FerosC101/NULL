@@ -180,7 +180,8 @@ export function RemediationRow({ remediation, onChanged }: { remediation: Remedi
             {pending && can("remediations.approve") && <Button small variant="primary" busy={busy === "approve"} onClick={() => act("approve", `${remediation.ref} approved`, {})}>Approve</Button>}
             {pending && can("remediations.approve") && <Button small variant="danger" busy={busy === "reject"} onClick={() => act("reject", `${remediation.ref} rejected`, {})}>Reject</Button>}
             {!executed && can("remediations.write") && <Button small onClick={() => setModifying(true)}>Modify</Button>}
-            {approved && can("remediations.execute") && <Button small variant={executed ? "secondary" : "primary"} onClick={() => setExecuting(true)}>{executed ? "Execute again" : "Execute"}</Button>}
+            {approved && !remediation.can_execute && <p className="text-[13px] text-dim">NULL can&apos;t change the systems behind uploaded evidence. Make this change yourself, then upload a new export to verify it.</p>}
+            {approved && remediation.can_execute && can("remediations.execute") && <Button small variant={executed ? "secondary" : "primary"} onClick={() => setExecuting(true)}>{executed ? "Execute again" : "Execute"}</Button>}
             {executed && can("remediations.write") && <Button small variant="primary" busy={busy === "verify"} onClick={() => act("verify", `Verification finished for ${remediation.ref}`)}>Run verification</Button>}
             {pending && !can("remediations.approve") && <span className="text-xs text-dim">Awaiting a decision from an approver.</span>}
           </>

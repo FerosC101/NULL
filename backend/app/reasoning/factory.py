@@ -28,6 +28,19 @@ def model_blocker(model: str) -> str | None:
     return None
 
 
+def for_evidence(choice: ProviderChoice, data_class: str, allow_model: bool, model: str) -> ProviderChoice:
+    """Real evidence reaches a model only with consent, and never one whose terms allow training on it."""
+    if data_class != "real" or choice.mode == "deterministic":
+        return choice
+    if model.endswith(CONTRIBUTOR_SUFFIX):
+        note = "Real evidence is never sent to a Contributor model. Rule-based roles ran instead."
+    elif not allow_model:
+        note = "This upload stays on this server, so rule-based roles ran instead of the model."
+    else:
+        return choice
+    return ProviderChoice(DeterministicProvider(), "deterministic", note)
+
+
 def choose_provider(ai_settings: dict) -> ProviderChoice:
     settings = get_settings()
     requested = ai_settings.get("reasoning_mode", "auto")

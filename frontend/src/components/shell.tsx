@@ -15,7 +15,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, useApi } from "@/lib/api";
-import type { Me, SourceView } from "@/lib/types";
+import type { DatasetInfo, Me, SourceView } from "@/lib/types";
 import { Logo } from "./logo";
 import { ErrorNote, Loading, ToastProvider } from "./ui";
 
@@ -73,10 +73,25 @@ function WorkspaceSelector({ name }: { name: string }) {
   );
 }
 
+function DataNotice({ dataset }: { dataset: DatasetInfo }) {
+  const notice =
+    dataset.origin === "demo"
+      ? ["DEMONSTRATION WORKSPACE", "Synthetic data for a fictional company. No real systems are accessed or changed."]
+      : dataset.data_class === "real"
+        ? ["UPLOADED EVIDENCE", `${dataset.label}. NULL reads these files and does not change the systems behind them.`]
+        : ["SYNTHETIC UPLOAD", `${dataset.label}. Test data. No real organization is being examined.`];
+  return (
+    <p className="no-print border-b border-line px-8 py-1.5 text-[11px] tracking-[0.04em] text-dim">
+      <span className="mono">{notice[0]}</span>
+      <span className="text-mute"> · {notice[1]}</span>
+    </p>
+  );
+}
+
 function ConnectionStatus({ me }: { me: Me }) {
   const { data } = useApi<{ sources: SourceView[] }>("/sources");
   const connected = data?.sources.filter((s) => s.status === "connected") ?? [];
-  const simulated = connected.every((s) => s.mode === "simulated");
+  const mode = me.workspace.dataset.origin === "upload" ? "Uploaded files" : "Simulated";
   return (
     <Link href="/sources" className="block rounded-md px-2 py-2 text-xs text-dim transition-colors hover:bg-raised">
       <span className="flex items-center gap-2">
@@ -84,7 +99,7 @@ function ConnectionStatus({ me }: { me: Me }) {
         {data ? `${connected.length} of ${data.sources.length} sources connected` : "Checking sources"}
       </span>
       <span className="mt-0.5 block pl-3.5 text-mute">
-        {simulated ? "Simulated" : "Live"} · {me.ai.active === "meta" ? me.ai.model_id : "Deterministic reasoning"}
+        {mode} · {me.ai.active === "meta" ? me.ai.model_id : "Deterministic reasoning"}
       </span>
     </Link>
   );
@@ -205,12 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Sidebar me={me} />
           <div className="min-w-0 flex-1">
             <CompactNav />
-            {me.workspace.is_demo && (
-              <p className="no-print border-b border-line px-8 py-1.5 text-[11px] tracking-[0.04em] text-dim">
-                <span className="mono">DEMONSTRATION WORKSPACE</span>
-                <span className="text-mute"> · Synthetic data for a fictional company. No real systems are accessed or changed.</span>
-              </p>
-            )}
+            <DataNotice dataset={me.workspace.dataset} />
             {children}
           </div>
         </div>

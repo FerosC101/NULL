@@ -533,7 +533,7 @@ class Document(BaseDocTemplate):
         canvas.drawString(MARGIN + 13, PAGE_H - 12 * mm - 2.2, f"{self.report.ref}  VERSION {self.report.version}")
         canvas.drawRightString(PAGE_W - MARGIN, PAGE_H - 12 * mm - 2.2, s["investigation"]["ref"])
         canvas.setFont("Geist", 6.8)
-        canvas.drawString(MARGIN, 11 * mm, "Synthetic demonstration data. No real organization was examined.")
+        canvas.drawString(MARGIN, 11 * mm, s["demo_notice"])
         canvas.setFont("GeistMono", 6.8)
         canvas.drawRightString(PAGE_W - MARGIN, 11 * mm, f"PAGE {doc.page} OF {self.total or doc.page}")
         canvas.restoreState()
@@ -719,7 +719,7 @@ class Story:
                     ["Time period", f"{_when(scope['window_start'])} to {_when(scope['window_end'])}"],
                     ["Assets", scope["assets"]],
                     ["Objective", scope["objective"] or "Not stated"],
-                    ["Dataset", f"{scope['dataset']} (synthetic)"],
+                    ["Dataset", f"{scope['dataset']} ({scope.get('data_class', 'synthetic')})"],
                     ["Claim interpretation", s["claim"]["interpretation"] or "Not recorded"],
                     ["Reasoning", s["investigation"]["reasoning_note"] or s["investigation"]["reasoning_mode"]],
                 ],

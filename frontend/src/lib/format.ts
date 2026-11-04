@@ -51,4 +51,6 @@ const STATUS_LABELS: Record<string, string> = {
 
 export const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
+export const dataClass = (value: string | undefined) => (value === "real" ? "real logs" : "synthetic");
+
 export const sentence = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replaceAll("_", " ");

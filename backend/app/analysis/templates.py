@@ -220,6 +220,28 @@ MFA_REALITIES = [
     ),
 ]
 
+# Neither test can change the result on its own. They run only when a proposed explanation needs them.
+MFA_CHECKS = [
+    CheckSpec(
+        "inspect_independent_auth",
+        "Inspect independent authentication records",
+        "Anti-join domain-controller and VPN records against identity-provider sessions, excluding logons inside an "
+        "approved change on the same host.",
+        "A session that never passed through the identity provider never met its MFA policy, and it can't appear in "
+        "the sign-in logs. Only independent records can show it.",
+        ["directory:read (restricted)", "idp_auth:read", "coverage:read"],
+        "Read-only. Reads restricted directory logs, so access is recorded in the audit log.",
+    ),
+    CheckSpec(
+        "check_collection_continuity",
+        "Check collection continuity",
+        "Count records per subnet per hour and report hours with no records at all.",
+        "Gaps in collection could hide sign-ins, so a clean sign-in log needs complete collection behind it.",
+        ["network:read"],
+        "Read-only.",
+    ),
+]
+
 MFA_ASSUMPTIONS = [
     AssumptionSpec(
         "idp_is_chokepoint",
@@ -251,6 +273,6 @@ TEMPLATES = {
         "realities": MFA_REALITIES,
         "assumptions": MFA_ASSUMPTIONS,
         "automatic": ["audit_mfa"],
-        "checks": [],
+        "checks": MFA_CHECKS,
     },
 }

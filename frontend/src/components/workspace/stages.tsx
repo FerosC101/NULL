@@ -6,7 +6,7 @@ import { RemediationRow, VerificationList } from "@/components/assurance/actions
 import { ChartFrame, CoverageMatrix, HostCoverage, matrixTable } from "@/components/charts";
 import { AssessmentMark, Button, Field, Loading, Tag, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
-import { sentence, utc } from "@/lib/format";
+import { dataClass, sentence, utc } from "@/lib/format";
 import type { Exhibits, InvestigationDetail } from "@/lib/types";
 import { EvidenceRef, EvidenceRefs, EvidenceTable, useInspect } from "./evidence";
 
@@ -46,7 +46,7 @@ export function ClaimStage({ investigation }: { investigation: InvestigationDeta
         <Field label="Claim scope">{scope.assets_label}</Field>
         <Field label="Evidence sources">{investigation.source_keys.length} selected</Field>
         <Field label="Objective">{investigation.objective || "Not stated"}</Field>
-        <Field label="Dataset">{investigation.dataset_label} (synthetic)</Field>
+        <Field label="Dataset">{investigation.dataset_label} ({dataClass(investigation.data_class)})</Field>
         <Field label="Investigator">{investigation.assignee}</Field>
       </dl>
       {compiled.notes?.length > 0 && (
@@ -219,7 +219,7 @@ export function FindingsStage({ investigation }: { investigation: InvestigationD
           ))}
         </dl>
       </div>
-      {investigation.status === "concluded" && <AnswerKey investigation={investigation} />}
+      {investigation.status === "concluded" && investigation.dataset_origin === "demo" && <AnswerKey investigation={investigation} />}
     </section>
   );
 }

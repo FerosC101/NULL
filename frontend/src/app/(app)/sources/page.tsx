@@ -1,17 +1,19 @@
 "use client";
 
-import { Lock } from "lucide-react";
+import { Lock, Upload } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { ChartFrame, CoverageMatrix, matrixTable } from "@/components/charts";
 import { useSession } from "@/components/shell";
-import { Button, ErrorNote, Field, Loading, Modal, PageHeader, Tag, useToast } from "@/components/ui";
+import { Button, ErrorNote, Field, LinkButton, Loading, Modal, PageHeader, Tag, useToast } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { ago, utc } from "@/lib/format";
-import type { CoverageMatrixData, SourceView } from "@/lib/types";
+import { ago, dataClass, utc } from "@/lib/format";
+import type { CoverageMatrixData, DatasetInfo, ImportView, SourceView } from "@/lib/types";
 
 interface SourcesData {
   active_dataset: string;
-  datasets: { key: string; label: string }[];
+  dataset: DatasetInfo;
+  datasets: DatasetInfo[];
   sources: SourceView[];
 }
 
@@ -87,6 +89,7 @@ export default function SourcesPage() {
   const toast = useToast();
   const { data, error, reload } = useApi<SourcesData>("/sources");
   const { data: coverage, reload: reloadCoverage } = useApi<CoverageMatrixData>("/sources/coverage");
+  const { data: uploads } = useApi<ImportView[]>(can("sources.manage") ? "/imports" : null);
   const refresh = () => {
     reload();
     reloadCoverage();
@@ -95,7 +98,7 @@ export default function SourcesPage() {
   async function changeSnapshot(dataset: string) {
     try {
       await api("/sources/snapshot", { body: { dataset } });
-      refresh();
+      window.location.reload();
     } catch (cause) {
       toast(cause instanceof Error ? cause.message : "The snapshot couldn't be changed", "bad");
     }
@@ -107,12 +110,15 @@ export default function SourcesPage() {
         title="Sources"
         description="NULL can only know what these sources can show."
         action={data && (
-          <label className="flex items-center gap-2 text-[13px] text-dim">
-            Demo snapshot
-            <select className="field !w-auto" disabled={!can("sources.manage")} value={data.active_dataset} onChange={(event) => changeSnapshot(event.target.value)}>
-              {data.datasets.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
-            </select>
-          </label>
+          <span className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-[13px] text-dim">
+              Dataset
+              <select className="field !w-auto" disabled={!can("sources.manage")} value={data.active_dataset} onChange={(event) => changeSnapshot(event.target.value)}>
+                {data.datasets.map((d) => <option key={d.key} value={d.key}>{d.label} ({dataClass(d.data_class)})</option>)}
+              </select>
+            </label>
+            {can("sources.manage") && <LinkButton href="/sources/import"><Upload size={15} aria-hidden /> Upload evidence</LinkButton>}
+          </span>
         )}
       />
       {error && !data && <ErrorNote message={error} onRetry={reload} />}
@@ -120,7 +126,9 @@ export default function SourcesPage() {
       {data && (
         <div className="space-y-11">
           <p className="border-y border-dashed border-line py-3 text-[13px] text-dim">
-            No live integrations are connected. Everything here is simulated data for a fictional company, loaded from a fixed snapshot. Adding a live connector isn&apos;t available yet.
+            {data.dataset.origin === "demo"
+              ? "No live integrations are connected. Everything here is simulated data for a fictional company, loaded from a fixed snapshot."
+              : `No live integrations are connected. These records come from uploaded files covering ${utc(data.dataset.window_start)} to ${utc(data.dataset.window_end)}, and they won't update on their own.`}
           </p>
           {coverage && (
             <ChartFrame
@@ -133,11 +141,28 @@ export default function SourcesPage() {
             </ChartFrame>
           )}
           <section aria-labelledby="sources-heading">
-            <h2 id="sources-heading" className="mb-2 text-[15px]">Simulated sources</h2>
+            <h2 id="sources-heading" className="mb-2 text-[15px]">{data.dataset.origin === "demo" ? "Simulated sources" : "Sources in this dataset"}</h2>
             <ul className="divide-y divide-line border-y border-line">
               {data.sources.map((source) => <SourceRow key={source.key} source={source} onChanged={refresh} />)}
             </ul>
           </section>
+          {uploads && uploads.length > 0 && (
+            <section aria-labelledby="uploads-heading">
+              <h2 id="uploads-heading" className="mb-2 text-[15px]">Uploads</h2>
+              <ul className="divide-y divide-line border-y border-line">
+                {uploads.map((upload) => (
+                  <li key={upload.key}>
+                    <Link href={`/sources/import/${upload.key}`} className="-mx-3 flex flex-wrap items-baseline justify-between gap-x-6 rounded-md px-3 py-3 transition-colors hover:bg-surface">
+                      <span className="text-sm">{upload.label} <span className="text-dim">({dataClass(upload.data_class)})</span></span>
+                      <span className="text-[13px] text-dim">
+                        {upload.status === "ready" ? `${(upload.summary.total ?? 0).toLocaleString()} records` : `Draft, ${upload.files.length} ${upload.files.length === 1 ? "file" : "files"}`}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       )}
     </main>

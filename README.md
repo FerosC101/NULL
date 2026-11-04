@@ -6,7 +6,7 @@ NULL is an evidence intelligence platform. Given a claim such as "no unauthorize
 evidence could ever have justified that conclusion, builds competing explanations, recommends the check that best
 separates them, runs what a person approves, and tracks fixes until evidence shows they worked.
 
-The included demonstration uses synthetic data for a fictional company. It touches no real infrastructure.
+You can also upload exported logs as CSV files and investigate those, as described under [Uploading evidence](#uploading-evidence). The included demonstration uses synthetic data for a fictional company. It touches no real infrastructure.
 
 ## Run it
 
@@ -46,6 +46,28 @@ Each snapshot has a different hidden outcome. The same claim on the same code gi
 | B | No intrusion, but two gateways have no evidence at all | PARTIALLY IDENTIFIED |
 | C | No intrusion, complete coverage | SUPPORTED |
 | D | Intrusion on a monitored endpoint, no EDR alert | CONTRADICTED |
+
+## Uploading evidence
+
+Open **Sources > Upload evidence**, say whether the data is real or synthetic, and add your CSV exports. NULL recognizes
+each file type, shows how many rows it could read and why it rejected the rest, and only then writes evidence.
+
+- **Formats:** sign-in logs, network flows, endpoint events and agents, asset register, Windows logons, VPN sessions,
+  change tickets and log forwarding. Columns are matched by name and can be mapped by hand. Files must be UTF-8 or UTF-16
+  and use ISO 8601 times.
+- **Nothing is guessed.** A time with no time zone, an unknown status or a missing required value rejects the row until
+  you pick a time zone or accept losing it. Files are kept as received, and each record names its file and row.
+- **Records can't be changed once added.** The analysis engine reads them exactly as it reads the demo snapshots.
+- **A missing source is reported, not passed.** Tests that need it are marked unavailable. So are comparisons with fewer
+  than 24 hours of baseline before the period.
+- **Real logs stay on your server by default.** They reach the Meta model only if you allow it for that upload, and never
+  a Contributor model. Meta doesn't train on Standard model content, but its terms allow human review and name no fixed
+  retention period. See its [data commitments](https://dev.meta.ai/legal/commitments).
+- **NULL can't act on uploaded evidence.** It proposes corrective actions, but you make the change and upload a new export.
+  Simulated execution is refused, so no made-up record can enter real evidence.
+
+[docs/trying-real-logs.md](docs/trying-real-logs.md) walks through a first real export. Sample files are in
+[docs/datasets/tallowmere-synthetic](docs/datasets/tallowmere-synthetic).
 
 ## How a conclusion is reached
 
@@ -93,12 +115,12 @@ Completions protocol. To turn them on, set `MODEL_API_KEY` and `META_MODEL_ID` i
 make smoke-meta
 ```
 
-- **Not yet run against the live API.** The client is tested against a fake server that enforces the documented rules.
 - Without a key, or if a call fails, rule-based roles take over. The investigation says so and records the failure.
+- Output that breaks a schema rule is sent back once for correction before NULL falls back.
 - Model output is schema-validated. References to unknown evidence or observables are dropped, and the model can run only
   the read-only analyses already permitted. Checks that need approval are refused.
 - `-contributor` model IDs may be used to train Meta's models, so they are blocked unless
-  `NULL_ALLOW_CONTRIBUTOR_MODELS=true`.
+  `NULL_ALLOW_CONTRIBUTOR_MODELS=true`. Real evidence never reaches them, even then.
 
 ## Layout
 
@@ -122,8 +144,10 @@ make e2e     # Browser: full demo. Needs `make api` and `make web`. WIPES the de
 
 ## Before real use
 
-- Live connectors don't exist. All sources are simulated, and `execute_simulated` writes records rather than changing
-  systems. Connecting one means implementing a reader and an execution integration.
+- Live connectors don't exist. Evidence comes from the simulated snapshots or uploaded files, and `execute_simulated`
+  writes demo records rather than changing systems. A live connector means implementing a reader and an execution
+  integration.
+- The statistical thresholds and logon matching haven't been tested on real logs, so treat early results as a trial.
 - Analysis runs in a thread inside the API process. A restart marks running investigations as failed. Use a real queue
   before running several workers.
 - Login throttling lives in memory, so it's per process.

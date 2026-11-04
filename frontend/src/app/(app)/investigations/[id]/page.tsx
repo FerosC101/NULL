@@ -13,7 +13,7 @@ import { CompetingRealities } from "@/components/workspace/realities";
 import { RecommendedInvestigation } from "@/components/workspace/recommended";
 import { ActionsStage, ClaimStage, EvidenceStage, FindingsStage, StageHeading, VerificationStage } from "@/components/workspace/stages";
 import { api, useApi } from "@/lib/api";
-import { ago } from "@/lib/format";
+import { ago, dataClass } from "@/lib/format";
 import type { Exhibits, InvestigationDetail, ReportSummary } from "@/lib/types";
 
 const RUNNING = new Set(["queued", "analyzing", "running_checks"]);
@@ -156,7 +156,7 @@ export default function WorkspacePage() {
               <StatusText status={data.status} />
               <span>Updated {ago(data.updated_at)}</span>
               <span>{data.lifecycle.completed} of 7 stages complete</span>
-              <span className="mono text-xs">{data.dataset_label} (synthetic)</span>
+              <span className="mono text-xs">{data.dataset_label} ({dataClass(data.data_class)})</span>
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

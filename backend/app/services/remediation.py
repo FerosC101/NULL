@@ -7,10 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.demo.generator import WINDOW_END
 from app.models import EvidenceRecord, Finding, Investigation, Remediation, User, VerificationRun
-
-
-def _next_ref(db: Session) -> str:
-    return f"RM-{(db.scalar(select(func.count(Remediation.id))) or 0) + 1:04d}"
+from app.services.refs import next_ref
 
 
 def _blueprints(findings: dict[str, Finding]) -> list[dict]:
@@ -113,7 +110,7 @@ def sync_remediations(db: Session, investigation: Investigation) -> None:
             Remediation(
                 workspace_id=investigation.workspace_id,
                 investigation_id=investigation.id,
-                ref=_next_ref(db),
+                ref=next_ref(db, Remediation, "RM"),
                 owner_id=investigation.assignee_id,
                 **plan,
             )

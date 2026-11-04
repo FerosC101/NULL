@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.analysis.observables import TOOLS, active_coverage, failure_profile
 from app.analysis.records import EvidenceReader, SourceUnavailable
-from app.demo.generator import WINDOW_END, WINDOW_START
 from app.models import DataSource, EvidenceItem, Investigation, ToolExecution
+from app.services.datasets import describe, last_hours
 
 # EDR telemetry arrives in 4-hour batches, so an hourly row would show gaps that aren't gaps.
 CADENCE_HOURS = {"edr": 4}
@@ -102,7 +102,11 @@ def coverage_matrix(
         if closed:
             add_closed(key, label, closed)
             continue
-        frame = reader.frame(key)
+        try:
+            frame = reader.frame(key)
+        except SourceUnavailable:
+            add_closed(key, label, "empty")
+            continue
         frame = frame[(frame["ts"] >= start) & (frame["ts"] < end)]
         rows.append(
             {
@@ -119,10 +123,15 @@ def coverage_matrix(
 
     network = sources.get("network")
     closed = _closed_row(network, "network", selected, restricted_open)
+    frame = None
     if closed:
         add_closed("network", network.name if network else "network", closed)
     else:
-        frame = reader.frame("network")
+        try:
+            frame = reader.frame("network")
+        except SourceUnavailable:
+            add_closed("network", network.name, "empty")
+    if frame is not None:
         windowed = frame[(frame["ts"] >= start) & (frame["ts"] < end)]
         # Subnets come from all records, so one silent for the whole window still gets a row.
         for subnet in sorted(frame["subnet"].dropna().unique()) if len(frame) else []:
@@ -146,9 +155,12 @@ def coverage_matrix(
         closed = _closed_row(source, key, selected, restricted_open)
         entry = {"key": key, "label": source.name if source else key, "state": closed or "readable", "records": None}
         if not closed:
-            frame = reader.frame(key)
-            entry["records"] = len(frame)
-            entry["taken_at"] = frame["ts"].max().isoformat() if len(frame) else None
+            try:
+                frame = reader.frame(key)
+                entry["records"] = len(frame)
+                entry["taken_at"] = frame["ts"].max().isoformat() if len(frame) else None
+            except SourceUnavailable:
+                entry["state"] = "empty"
         snapshots.append(entry)
 
     gaps = [
@@ -229,7 +241,7 @@ def egress_series(reader: EvidenceReader, start: datetime, end: datetime, observ
     result = observables.get("egress_anomaly_uncovered")
     if not result:
         return []
-    details = result["details"]
+    details = result.get("details", {})
     flagged = details.get("flagged", []) + details.get("explained_by_change", [])
     if not flagged:
         return []
@@ -341,4 +353,5 @@ def workspace_matrix(db: Session, workspace_id: str, dataset: str) -> dict:
     """Collection health for the Sources page. Restricted sources stay closed here."""
     sources = db.scalars(select(DataSource).where(DataSource.workspace_id == workspace_id))
     connected = {s.key for s in sources if s.status == "connected"}
-    return coverage_matrix(db, workspace_id, dataset, WINDOW_START, WINDOW_END, connected, set())
+    start, end = last_hours(describe(db, dataset, workspace_id), 24)
+    return coverage_matrix(db, workspace_id, dataset, start, end, connected, set())

@@ -12,6 +12,7 @@ from app.db import get_db
 from app.models import Investigation, Remediation, User, VerificationRun, utcnow
 from app.security import audit, require
 from app.services.assurance import preventive_scan, unverified_assumptions
+from app.services.datasets import DEMO, active, describe
 from app.services.graph import rebuild_graph
 from app.services.remediation import execute_simulated, run_verification, simulate_recurrence
 
@@ -47,7 +48,7 @@ def runs_for(db: Session, remediation_ids: list[str]) -> dict[str, list[Verifica
 @router.get("")
 def assurance(db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))):
     workspace = get_workspace(db, user)
-    dataset = (workspace.settings or {}).get("active_dataset", "A")
+    dataset = active(db, workspace).key
     rows = db.scalars(
         select(Remediation)
         .options(joinedload(Remediation.owner))
@@ -147,6 +148,17 @@ def modify(
     return _out(db, remediation)
 
 
+def _require_simulated(db: Session, investigation) -> None:
+    """The simulated integration writes records, which must never enter uploaded evidence."""
+    info = describe(db, investigation.dataset, investigation.workspace_id)
+    if info is None or info.origin != DEMO:
+        raise HTTPException(
+            409,
+            "NULL can't change the systems behind uploaded evidence. Make this change yourself, then upload a new "
+            "export to verify it.",
+        )
+
+
 @router.post("/remediations/{remediation_id}/execute")
 def execute(
     remediation_id: str,
@@ -163,6 +175,7 @@ def execute(
     if remediation.verification_status == "verified":
         raise HTTPException(409, "This action is already verified")
     investigation = get_investigation(db, user, remediation.investigation_id)
+    _require_simulated(db, investigation)
     message = execute_simulated(db, remediation, investigation.dataset)
     remediation.execution_status = "executed"
     remediation.executed_at = utcnow()
@@ -215,6 +228,7 @@ def recurrence(
     if remediation.verification_status != "verified":
         raise HTTPException(409, "Only a verified action can recur")
     investigation = get_investigation(db, user, remediation.investigation_id)
+    _require_simulated(db, investigation)
     try:
         message = simulate_recurrence(db, remediation, investigation.dataset)
     except ValueError as exc:

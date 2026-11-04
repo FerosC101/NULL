@@ -21,6 +21,7 @@ from app.analysis.validation import (
     evaluate_hypothesis,
     expected_information_gain,
 )
+from app.config import get_settings
 from app.db import SessionLocal
 from app.models import (
     Assumption,
@@ -38,7 +39,8 @@ from app.models import (
 )
 from app.reasoning.base import Blackboard, ReasoningFailure
 from app.reasoning.deterministic import DeterministicProvider
-from app.reasoning.factory import ProviderChoice, choose_provider
+from app.reasoning.factory import ProviderChoice, choose_provider, for_evidence
+from app.services.datasets import describe
 from app.services.graph import rebuild_graph
 from app.services.remediation import sync_remediations
 
@@ -605,7 +607,13 @@ def _preview(value: Any) -> Any:
 def _open(db: Session, investigation_id: str) -> tuple[Investigation, ProviderChoice]:
     investigation = db.get(Investigation, investigation_id)
     workspace = db.get(Workspace, investigation.workspace_id)
-    return investigation, choose_provider((workspace.settings or {}).get("ai", {}))
+    ai_settings = (workspace.settings or {}).get("ai", {})
+    choice = choose_provider(ai_settings)
+    dataset = describe(db, investigation.dataset)
+    if dataset is None:
+        return investigation, choice
+    model = ai_settings.get("model_id") or get_settings().meta_model_id
+    return investigation, for_evidence(choice, dataset.data_class, dataset.allow_model, model)
 
 
 def analyze(db: Session, investigation_id: str) -> None:
