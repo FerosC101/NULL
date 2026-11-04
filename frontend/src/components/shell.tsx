@@ -15,19 +15,24 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, useApi } from "@/lib/api";
-import type { Me, SourceView } from "@/lib/types";
+import type { DatasetInfo, Me, SourceView } from "@/lib/types";
 import { Logo } from "./logo";
 import { ErrorNote, Loading, ToastProvider } from "./ui";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/investigations", label: "Investigations", icon: Search },
-  { href: "/network", label: "Evidence Network", icon: Waypoints },
   { href: "/assurance", label: "Assurance", icon: ShieldCheck },
+  { href: "/sources", label: "Sources", icon: Database },
+];
+
+const SECONDARY_NAV = [
   { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/sources", label: "Data Sources", icon: Database },
+  { href: "/network", label: "Evidence Network", icon: Waypoints },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+const isActive = (pathname: string, href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
 const SessionContext = createContext<(Me & { can: (permission: string) => boolean }) | null>(null);
 
@@ -68,10 +73,25 @@ function WorkspaceSelector({ name }: { name: string }) {
   );
 }
 
+function DataNotice({ dataset }: { dataset: DatasetInfo }) {
+  const notice =
+    dataset.origin === "demo"
+      ? ["DEMONSTRATION WORKSPACE", "Synthetic data for a fictional company. No real systems are accessed or changed."]
+      : dataset.data_class === "real"
+        ? ["UPLOADED EVIDENCE", `${dataset.label}. NULL reads these files and does not change the systems behind them.`]
+        : ["SYNTHETIC UPLOAD", `${dataset.label}. Test data. No real organization is being examined.`];
+  return (
+    <p className="no-print border-b border-line px-8 py-1.5 text-[11px] tracking-[0.04em] text-dim">
+      <span className="mono">{notice[0]}</span>
+      <span className="text-mute"> · {notice[1]}</span>
+    </p>
+  );
+}
+
 function ConnectionStatus({ me }: { me: Me }) {
   const { data } = useApi<{ sources: SourceView[] }>("/sources");
   const connected = data?.sources.filter((s) => s.status === "connected") ?? [];
-  const simulated = connected.every((s) => s.mode === "simulated");
+  const mode = me.workspace.dataset.origin === "upload" ? "Uploaded files" : "Simulated";
   return (
     <Link href="/sources" className="block rounded-md px-2 py-2 text-xs text-dim transition-colors hover:bg-raised">
       <span className="flex items-center gap-2">
@@ -79,7 +99,7 @@ function ConnectionStatus({ me }: { me: Me }) {
         {data ? `${connected.length} of ${data.sources.length} sources connected` : "Checking sources"}
       </span>
       <span className="mt-0.5 block pl-3.5 text-mute">
-        {simulated ? "Simulated" : "Live"} · {me.ai.active === "meta" ? me.ai.model_id : "Deterministic reasoning"}
+        {mode} · {me.ai.active === "meta" ? me.ai.model_id : "Deterministic reasoning"}
       </span>
     </Link>
   );
@@ -93,30 +113,50 @@ function Sidebar({ me }: { me: Me }) {
     router.push("/login");
   }
   return (
-    <aside className="sticky top-0 flex h-dvh w-[232px] shrink-0 flex-col border-r border-line bg-void px-3 py-5 max-lg:hidden">
+    <aside className="no-print sticky top-0 flex h-dvh w-[232px] shrink-0 flex-col border-r border-line bg-void px-3 py-5 max-lg:hidden">
       <Link href="/" className="mb-6 block px-2" aria-label="NULL home">
         <Logo size={24} />
       </Link>
       <div className="mb-5 px-0.5">
         <WorkspaceSelector name={me.workspace.name} />
       </div>
-      <nav aria-label="Main" className="flex-1 space-y-0.5">
-        {NAV.map(({ href, label, icon: Icon }) => {
-          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? "page" : undefined}
-              className={`flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-sm transition-colors ${
-                active ? "bg-raised text-fg" : "text-dim hover:text-fg"
-              }`}
-            >
-              <Icon size={15} strokeWidth={1.6} aria-hidden />
-              {label}
-            </Link>
-          );
-        })}
+      <nav aria-label="Main" className="flex flex-1 flex-col">
+        <div className="space-y-0.5">
+          {NAV.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-sm transition-colors ${
+                  active ? "bg-raised text-fg" : "text-dim hover:text-fg"
+                }`}
+              >
+                <Icon size={15} strokeWidth={1.6} aria-hidden />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="mt-auto space-y-0.5 pb-2">
+          {SECONDARY_NAV.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2.5 rounded-md px-2.5 py-[5px] text-[13px] transition-colors ${
+                  active ? "bg-raised text-fg" : "text-mute hover:text-fg"
+                }`}
+              >
+                <Icon size={14} strokeWidth={1.6} aria-hidden />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
       <ConnectionStatus me={me} />
       <div className="mt-2 flex items-center gap-2.5 border-t border-line px-2 pt-3">
@@ -138,9 +178,9 @@ function Sidebar({ me }: { me: Me }) {
 function CompactNav() {
   const pathname = usePathname();
   return (
-    <nav aria-label="Main" className="sticky top-0 z-20 flex gap-1 overflow-x-auto border-b border-line bg-void px-3 py-2 lg:hidden">
-      {NAV.map(({ href, label }) => {
-        const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+    <nav aria-label="Main" className="no-print sticky top-0 z-20 flex gap-1 overflow-x-auto border-b border-line bg-void px-3 py-2 lg:hidden">
+      {[...NAV, ...SECONDARY_NAV].map(({ href, label }) => {
+        const active = isActive(pathname, href);
         return (
           <Link key={href} href={href} className={`whitespace-nowrap rounded-md px-2.5 py-1 text-[13px] ${active ? "bg-raised text-fg" : "text-dim"}`}>
             {label}
@@ -180,12 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Sidebar me={me} />
           <div className="min-w-0 flex-1">
             <CompactNav />
-            {me.workspace.is_demo && (
-              <p className="no-print border-b border-line px-8 py-1.5 text-[11px] tracking-[0.04em] text-dim">
-                <span className="mono">DEMONSTRATION WORKSPACE</span>
-                <span className="text-mute"> · Synthetic data for a fictional company. No real systems are accessed or changed.</span>
-              </p>
-            )}
+            <DataNotice dataset={me.workspace.dataset} />
             {children}
           </div>
         </div>

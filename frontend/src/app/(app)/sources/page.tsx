@@ -1,20 +1,23 @@
 "use client";
 
-import { Lock } from "lucide-react";
+import { Lock, Upload } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
+import { ChartFrame, CoverageMatrix, matrixTable } from "@/components/charts";
 import { useSession } from "@/components/shell";
-import { Button, ErrorNote, Field, Loading, Modal, PageHeader, Tag, useToast } from "@/components/ui";
+import { Button, ErrorNote, Field, LinkButton, Loading, Modal, PageHeader, Tag, useToast } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { ago, utc } from "@/lib/format";
-import type { SourceView } from "@/lib/types";
+import { ago, dataClass, utc } from "@/lib/format";
+import type { CoverageMatrixData, DatasetInfo, ImportView, SourceView } from "@/lib/types";
 
 interface SourcesData {
   active_dataset: string;
-  datasets: { key: string; label: string }[];
+  dataset: DatasetInfo;
+  datasets: DatasetInfo[];
   sources: SourceView[];
 }
 
-function SourceCard({ source, onChanged }: { source: SourceView; onChanged: () => void }) {
+function SourceRow({ source, onChanged }: { source: SourceView; onChanged: () => void }) {
   const { can } = useSession();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -37,50 +40,47 @@ function SourceCard({ source, onChanged }: { source: SourceView; onChanged: () =
   }
 
   return (
-    <article className="flex flex-col rounded-lg border border-line p-5">
-      <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-[15px]">
-            {source.name}
-            {source.restricted && <Lock size={12} className="text-dim" aria-label="Restricted source" />}
-          </h2>
-          <p className="mt-0.5 text-[13px] text-dim">{source.description}</p>
-        </div>
-        <Tag>{source.mode}</Tag>
-      </header>
-      <p className={`mt-4 flex items-center gap-2 text-[13px] ${connected ? "" : "text-bad"}`}>
-        <span aria-hidden className={`size-1.5 rounded-full ${connected ? "bg-ok" : "bg-bad"}`} />
-        {connected ? "Connected" : "Disconnected"}
-      </p>
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-4">
-        <Field label="Available records"><span className="mono text-[13px] text-fg">{source.records.toLocaleString()}</span></Field>
-        <Field label="Last synchronization"><span className="text-[13px]">{connected ? ago(source.last_sync_at) : "Not connected"}</span></Field>
-        <Field label="Data freshness"><span className="mono text-xs">{source.latest ? utc(source.latest) : "No data"}</span></Field>
-        <Field label="Coverage"><span className="text-[13px]">{source.coverage ?? (source.records ? "Not measured" : "None")}</span></Field>
-      </dl>
-      <div className="mt-3">
-        <Field label="Permissions">
-          <span className="flex flex-wrap gap-1.5">{source.permissions.map((p) => <Tag key={p}>{p}</Tag>)}</span>
-        </Field>
+    <li className="py-3.5">
+      <div className="grid items-baseline gap-x-6 gap-y-1 md:grid-cols-[minmax(0,1.3fr)_110px_150px_minmax(0,1fr)_auto]">
+        <h3 className="flex min-w-0 items-center gap-2 text-[15px]">
+          {source.name}
+          {source.restricted && <Lock size={12} className="shrink-0 text-dim" aria-label="Restricted source" />}
+        </h3>
+        <p className={`flex items-center gap-2 text-[13px] ${connected ? "text-dim" : "text-bad"}`}>
+          <span aria-hidden className={`size-1.5 rounded-full ${connected ? "bg-ok" : "bg-bad"}`} />
+          {connected ? "Connected" : "Disconnected"}
+        </p>
+        <p className="mono text-xs text-dim">{source.latest ? utc(source.latest) : "No data"}</p>
+        <p className="text-[13px] text-dim">{source.coverage ?? (source.records ? `${source.records.toLocaleString()} records` : "No records")}</p>
+        {manage && (
+          <div className="flex gap-1.5">
+            {connected ? (
+              <>
+                <Button small busy={busy} onClick={() => act("sync", `${source.name} re-read: ${source.records.toLocaleString()} records`)}>Re-read</Button>
+                <Button small variant="ghost" onClick={() => setConfirming(true)}>Disconnect</Button>
+              </>
+            ) : (
+              <Button small busy={busy} onClick={() => act("connect", `${source.name} connected`)}>Connect</Button>
+            )}
+          </div>
+        )}
       </div>
-      {manage && (
-        <div className="mt-4 flex gap-2 border-t border-line pt-3.5">
-          {connected ? (
-            <>
-              <Button small busy={busy} onClick={() => act("sync", `${source.name} re-read: ${source.records.toLocaleString()} records`)}>Re-read records</Button>
-              <Button small variant="ghost" onClick={() => setConfirming(true)}>Disconnect</Button>
-            </>
-          ) : (
-            <Button small busy={busy} onClick={() => act("connect", `${source.name} connected`)}>Connect</Button>
-          )}
-        </div>
-      )}
+      <details className="mt-1 text-xs text-dim">
+        <summary className="cursor-pointer transition-colors hover:text-fg">Details</summary>
+        <p className="mt-1.5 text-[13px]">{source.description}</p>
+        <dl className="mt-2 grid gap-x-6 gap-y-2 sm:grid-cols-4">
+          <Field label="Mode"><Tag>{source.mode}</Tag></Field>
+          <Field label="Available records"><span className="mono text-[13px]">{source.records.toLocaleString()}</span></Field>
+          <Field label="Last synchronization"><span className="text-[13px]">{connected ? ago(source.last_sync_at) : "Not connected"}</span></Field>
+          <Field label="Permissions"><span className="flex flex-wrap gap-1.5">{source.permissions.map((p) => <Tag key={p}>{p}</Tag>)}</span></Field>
+        </dl>
+      </details>
       {confirming && (
         <Modal open label={source.name} title="Disconnect this source?" onClose={() => setConfirming(false)} footer={<><Button onClick={() => setConfirming(false)}>Cancel</Button><Button variant="danger" busy={busy} onClick={() => act("disconnect", `${source.name} disconnected`)}>Disconnect</Button></>}>
           <p className="text-sm text-dim">Investigations won&apos;t be able to read this source. Checks that need it will be blocked, and NULL will report them as blocked.</p>
         </Modal>
       )}
-    </article>
+    </li>
   );
 }
 
@@ -88,11 +88,17 @@ export default function SourcesPage() {
   const { can } = useSession();
   const toast = useToast();
   const { data, error, reload } = useApi<SourcesData>("/sources");
+  const { data: coverage, reload: reloadCoverage } = useApi<CoverageMatrixData>("/sources/coverage");
+  const { data: uploads } = useApi<ImportView[]>(can("sources.manage") ? "/imports" : null);
+  const refresh = () => {
+    reload();
+    reloadCoverage();
+  };
 
   async function changeSnapshot(dataset: string) {
     try {
       await api("/sources/snapshot", { body: { dataset } });
-      reload();
+      window.location.reload();
     } catch (cause) {
       toast(cause instanceof Error ? cause.message : "The snapshot couldn't be changed", "bad");
     }
@@ -101,32 +107,63 @@ export default function SourcesPage() {
   return (
     <main className="mx-auto max-w-[1180px] px-8 py-10 max-sm:px-4">
       <PageHeader
-        title="Data Sources"
-        description="The evidence environment. NULL can only know what these sources can show."
+        title="Sources"
+        description="NULL can only know what these sources can show."
         action={data && (
-          <label className="flex items-center gap-2 text-[13px] text-dim">
-            Demo snapshot
-            <select className="field !w-auto" disabled={!can("sources.manage")} value={data.active_dataset} onChange={(event) => changeSnapshot(event.target.value)}>
-              {data.datasets.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
-            </select>
-          </label>
+          <span className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-[13px] text-dim">
+              Dataset
+              <select className="field !w-auto" disabled={!can("sources.manage")} value={data.active_dataset} onChange={(event) => changeSnapshot(event.target.value)}>
+                {data.datasets.map((d) => <option key={d.key} value={d.key}>{d.label} ({dataClass(d.data_class)})</option>)}
+              </select>
+            </label>
+            {can("sources.manage") && <LinkButton href="/sources/import"><Upload size={15} aria-hidden /> Upload evidence</LinkButton>}
+          </span>
         )}
       />
       {error && !data && <ErrorNote message={error} onRetry={reload} />}
       {!data && !error && <Loading rows={4} />}
       {data && (
-        <>
-          <section aria-labelledby="live-heading" className="mb-8 rounded-lg border border-dashed border-line px-5 py-4">
-            <h2 id="live-heading" className="text-[15px]">Live integrations</h2>
-            <p className="mt-0.5 text-[13px] text-dim">
-              No live integrations are connected. Everything below is simulated data for a fictional company, loaded from a fixed snapshot. Adding a live connector isn&apos;t available yet.
-            </p>
+        <div className="space-y-11">
+          <p className="border-y border-dashed border-line py-3 text-[13px] text-dim">
+            {data.dataset.origin === "demo"
+              ? "No live integrations are connected. Everything here is simulated data for a fictional company, loaded from a fixed snapshot."
+              : `No live integrations are connected. These records come from uploaded files covering ${utc(data.dataset.window_start)} to ${utc(data.dataset.window_end)}, and they won't update on their own.`}
+          </p>
+          {coverage && (
+            <ChartFrame
+              title="Collection health"
+              interpretation={coverage.interpretation}
+              period={`${utc(coverage.window.start)} to ${utc(coverage.window.end)}`}
+              table={matrixTable(coverage)}
+            >
+              <CoverageMatrix matrix={coverage} />
+            </ChartFrame>
+          )}
+          <section aria-labelledby="sources-heading">
+            <h2 id="sources-heading" className="mb-2 text-[15px]">{data.dataset.origin === "demo" ? "Simulated sources" : "Sources in this dataset"}</h2>
+            <ul className="divide-y divide-line border-y border-line">
+              {data.sources.map((source) => <SourceRow key={source.key} source={source} onChanged={refresh} />)}
+            </ul>
           </section>
-          <h2 className="label mb-3">Simulated sources</h2>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {data.sources.map((source) => <SourceCard key={source.key} source={source} onChanged={reload} />)}
-          </div>
-        </>
+          {uploads && uploads.length > 0 && (
+            <section aria-labelledby="uploads-heading">
+              <h2 id="uploads-heading" className="mb-2 text-[15px]">Uploads</h2>
+              <ul className="divide-y divide-line border-y border-line">
+                {uploads.map((upload) => (
+                  <li key={upload.key}>
+                    <Link href={`/sources/import/${upload.key}`} className="-mx-3 flex flex-wrap items-baseline justify-between gap-x-6 rounded-md px-3 py-3 transition-colors hover:bg-surface">
+                      <span className="text-sm">{upload.label} <span className="text-dim">({dataClass(upload.data_class)})</span></span>
+                      <span className="text-[13px] text-dim">
+                        {upload.status === "ready" ? `${(upload.summary.total ?? 0).toLocaleString()} records` : `Draft, ${upload.files.length} ${upload.files.length === 1 ? "file" : "files"}`}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       )}
     </main>
   );

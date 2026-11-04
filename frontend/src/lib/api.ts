@@ -19,13 +19,13 @@ function messageFrom(detail: unknown, fallback: string): string {
   return fallback;
 }
 
-export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T>(path: string, options: { method?: string; body?: unknown; file?: File } = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
-      method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+      method: options.method ?? (options.body === undefined && !options.file ? "GET" : "POST"),
       headers: options.body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: options.file ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
       credentials: "same-origin",
     });
   } catch {

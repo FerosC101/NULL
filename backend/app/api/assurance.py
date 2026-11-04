@@ -1,4 +1,7 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -9,6 +12,7 @@ from app.db import get_db
 from app.models import Investigation, Remediation, User, VerificationRun, utcnow
 from app.security import audit, require
 from app.services.assurance import preventive_scan, unverified_assumptions
+from app.services.datasets import DEMO, active, describe
 from app.services.graph import rebuild_graph
 from app.services.remediation import execute_simulated, run_verification, simulate_recurrence
 
@@ -23,6 +27,7 @@ class ModifyBody(BaseModel):
     action: str | None = Field(default=None, min_length=4, max_length=2000)
     priority: str | None = Field(default=None, pattern="^(critical|high|medium|low)$")
     owner_id: str | None = None
+    target_date: date | None = None
 
 
 class ExecuteBody(BaseModel):
@@ -43,7 +48,7 @@ def runs_for(db: Session, remediation_ids: list[str]) -> dict[str, list[Verifica
 @router.get("")
 def assurance(db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))):
     workspace = get_workspace(db, user)
-    dataset = (workspace.settings or {}).get("active_dataset", "A")
+    dataset = active(db, workspace).key
     rows = db.scalars(
         select(Remediation)
         .options(joinedload(Remediation.owner))
@@ -126,7 +131,8 @@ def modify(
     remediation = get_remediation(db, user, remediation_id)
     if remediation.execution_status == "executed":
         raise HTTPException(409, "An executed action can't be modified")
-    changes = body.model_dump(exclude_none=True)
+    # Only a target date can be cleared. An action always keeps a description, priority and owner.
+    changes = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k == "target_date"}
     if "owner_id" in changes:
         owner = db.get(User, changes["owner_id"])
         if owner is None or owner.workspace_id != user.workspace_id:
@@ -136,10 +142,21 @@ def modify(
     # Changing what an approval covered voids that approval.
     if "action" in changes and remediation.approval_status == "approved":
         remediation.approval_status = "pending"
-    audit(db, user, user.workspace_id, "remediation.modified", remediation.ref, changes, request)
+    audit(db, user, user.workspace_id, "remediation.modified", remediation.ref, jsonable_encoder(changes), request)
     db.commit()
     db.refresh(remediation)
     return _out(db, remediation)
+
+
+def _require_simulated(db: Session, investigation) -> None:
+    """The simulated integration writes records, which must never enter uploaded evidence."""
+    info = describe(db, investigation.dataset, investigation.workspace_id)
+    if info is None or info.origin != DEMO:
+        raise HTTPException(
+            409,
+            "NULL can't change the systems behind uploaded evidence. Make this change yourself, then upload a new "
+            "export to verify it.",
+        )
 
 
 @router.post("/remediations/{remediation_id}/execute")
@@ -158,6 +175,7 @@ def execute(
     if remediation.verification_status == "verified":
         raise HTTPException(409, "This action is already verified")
     investigation = get_investigation(db, user, remediation.investigation_id)
+    _require_simulated(db, investigation)
     message = execute_simulated(db, remediation, investigation.dataset)
     remediation.execution_status = "executed"
     remediation.executed_at = utcnow()
@@ -188,15 +206,12 @@ def verify(
         run = run_verification(db, remediation, investigation.dataset, user)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    audit(
-        db,
-        user,
-        user.workspace_id,
-        "remediation.verified",
-        remediation.ref,
-        {"passed": run.passed, "summary": run.summary},
-        request,
+    action = (
+        "remediation.verified"
+        if run.passed
+        else ("remediation.recurrence_detected" if run.recurrence else "remediation.verification_failed")
     )
+    audit(db, user, user.workspace_id, action, remediation.ref, {"passed": run.passed, "summary": run.summary}, request)
     _touch_graph(db, remediation)
     db.commit()
     return _out(db, remediation)
@@ -213,6 +228,7 @@ def recurrence(
     if remediation.verification_status != "verified":
         raise HTTPException(409, "Only a verified action can recur")
     investigation = get_investigation(db, user, remediation.investigation_id)
+    _require_simulated(db, investigation)
     try:
         message = simulate_recurrence(db, remediation, investigation.dataset)
     except ValueError as exc:

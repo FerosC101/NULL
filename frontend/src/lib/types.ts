@@ -2,8 +2,18 @@ export type Assessment = "SUPPORTED" | "CONTRADICTED" | "PARTIALLY IDENTIFIED" |
 
 export interface Me {
   user: { id: string; email: string; name: string; title: string; role: string; permissions: string[] };
-  workspace: { id: string; name: string; is_demo: boolean; active_dataset: string };
+  workspace: { id: string; name: string; is_demo: boolean; active_dataset: string; dataset: DatasetInfo };
   ai: AiStatus;
+}
+
+export interface DatasetInfo {
+  key: string;
+  label: string;
+  origin: "demo" | "upload";
+  data_class: "real" | "synthetic";
+  window_start: string;
+  window_end: string;
+  allow_model: boolean;
 }
 
 export interface AiStatus {
@@ -26,11 +36,129 @@ export interface InvestigationSummary {
   assessment: Assessment;
   dataset: string;
   dataset_label: string;
+  dataset_origin: "demo" | "upload";
+  data_class: "real" | "synthetic";
   source_keys: string[];
   assignee: string;
   created_at: string;
   updated_at: string;
   conclusion?: string;
+}
+
+export type StageStatus = "not_started" | "in_progress" | "completed" | "needs_attention" | "blocked";
+
+export interface StageView {
+  key: string;
+  label: string;
+  status: StageStatus;
+  summary: string;
+}
+
+export interface NextAction {
+  label: string;
+  detail: string;
+  stage: string;
+  kind: "open_stage" | "report" | "none";
+}
+
+export interface KeyFinding {
+  title: string;
+  body: string;
+  severity: string;
+  evidence_refs: string[];
+}
+
+export interface Lifecycle {
+  stages: StageView[];
+  current: string;
+  completed: number;
+  key_finding: KeyFinding | null;
+  uncertainty: string | null;
+  next_action: NextAction;
+}
+
+export interface InvestigationCard extends InvestigationSummary {
+  stages: StageView[];
+  key_finding: KeyFinding | null;
+  next_action: NextAction;
+}
+
+export interface EventView {
+  at: string | null;
+  kind: string;
+  label: string;
+  detail: string;
+  tone: "neutral" | "ok" | "bad";
+  planned: boolean;
+}
+
+export interface MatrixCell {
+  start: string;
+  hours: number;
+  count: number;
+  state: "records" | "none" | "gap";
+}
+
+export interface MatrixRow {
+  key: string;
+  label: string;
+  source_key: string;
+  state: "readable" | "disconnected" | "not_selected" | "restricted" | "empty";
+  cadence_hours: number;
+  records: number | null;
+  cells: MatrixCell[];
+  evidence_ref: string | null;
+}
+
+export interface CoverageMatrixData {
+  window: { start: string; end: string };
+  hours: string[];
+  rows: MatrixRow[];
+  snapshots: { key: string; label: string; state: string; records: number | null; taken_at?: string | null }[];
+  gaps: { label: string; hours: number }[];
+  unreadable: string[];
+  interpretation: string;
+}
+
+export interface HostCoverageData {
+  unavailable?: string;
+  hosts?: number;
+  reporting?: number;
+  by_class?: { asset_class: string; label: string; hosts: number; reporting: number; uncovered: string[] }[];
+  unmonitored?: {
+    hostname: string;
+    asset_class: string;
+    edr: "never_enrolled" | "stale";
+    network: boolean | null;
+    independent_logs: boolean | null;
+  }[];
+}
+
+export interface EgressSeries {
+  host: string;
+  explained_by_change: boolean;
+  anomaly_ts: string | null;
+  anomaly_bytes: number | null;
+  highest_ts: string | null;
+  highest_bytes: number | null;
+  baseline_median_bytes: number | null;
+  max_z: number | null;
+  baseline_records: number;
+  points: { ts: string; bytes: number | null; typical: number | null }[];
+  events: { ts: string; label: string }[];
+}
+
+export interface SigninSeries {
+  points: { ts: string; failures: number; expected: number; flagged: boolean }[];
+  flagged_hours: number;
+}
+
+export interface Exhibits {
+  coverage_matrix: CoverageMatrixData;
+  host_coverage: HostCoverageData;
+  egress: EgressSeries[];
+  signins: SigninSeries | null;
+  refs: { egress?: string | null; signins?: string | null; coverage?: string | null };
 }
 
 export interface TimelineItem {
@@ -93,6 +221,7 @@ export interface EvidenceView {
 export interface CheckView {
   id: string;
   tool: string;
+  observables: string[];
   title: string;
   procedure: string;
   rationale: string;
@@ -138,6 +267,7 @@ export interface RemediationView {
   priority: string;
   risk_addressed: string;
   owner: { id: string; name: string };
+  target_date: string | null;
   approval_status: string;
   execution_status: string;
   verification_status: string;
@@ -145,6 +275,7 @@ export interface RemediationView {
   verification_procedure: string;
   attempts: number;
   decision_note: string;
+  can_execute: boolean;
   can_simulate_recurrence: boolean;
   runs: VerificationRunView[];
 }
@@ -171,6 +302,8 @@ export interface InvestigationDetail extends InvestigationSummary {
   reasoning_mode: string;
   reasoning_note: string;
   error: string;
+  lifecycle: Lifecycle;
+  events: EventView[];
   timeline: TimelineItem[];
   realities: RealityView[];
   evidence: EvidenceView[];
@@ -200,6 +333,17 @@ export interface OverviewData {
     remediation: { pending: number; approved: number; executed: number; verified: number; total: number };
   };
   recent: InvestigationSummary[];
+  active: InvestigationCard[];
+  concluded: InvestigationCard[];
+  resolved: {
+    ref: string;
+    action: string;
+    finding: string;
+    investigation_id: string;
+    investigation_ref: string;
+    verified_at: string | null;
+    summary: string;
+  }[];
   attention: { kind: string; severity: string; title: string; detail: string; href: string }[];
 }
 
@@ -237,11 +381,51 @@ export interface SourceView {
   coverage: string | null;
 }
 
+export interface ImportFileView {
+  id: string;
+  name: string;
+  size: number;
+  kind: string | null;
+  kind_label: string | null;
+  source: string | null;
+  mapping: Record<string, string>;
+  timezone: string | null;
+  columns: string[];
+  preview: Record<string, string>[];
+  total_rows: number;
+  accepted: number;
+  rejected: number;
+  reasons: { reason: string; count: number }[];
+  samples: { row: number; reason: string }[];
+  missing: string[];
+  notes: string[];
+  ready: boolean;
+}
+
+export interface ImportView {
+  key: string;
+  label: string;
+  data_class: "real" | "synthetic";
+  status: "draft" | "ready";
+  window_start: string | null;
+  window_end: string | null;
+  summary: { records?: Record<string, number>; total?: number; sessions_inferred?: number; missing_sources?: string[] };
+  created_at: string;
+  files: ImportFileView[];
+}
+
+export interface ImportOptions {
+  kinds: { key: string; label: string; source: string; columns: { name: string; label: string; required: boolean }[] }[];
+  max_bytes: number;
+}
+
 export interface InvestigationOptions {
-  datasets: { key: string; label: string }[];
+  active_dataset: string;
+  datasets: DatasetInfo[];
   windows: { hours: number; label: string }[];
   asset_classes: { key: string; label: string }[];
   sources: { key: string; name: string; status: string; mode: string; restricted: boolean }[];
+  assignees: { id: string; name: string }[];
 }
 
 export interface GraphNodeView {
@@ -264,6 +448,7 @@ export interface GraphEdgeView {
 export interface ReportSummary {
   id: string;
   ref: string;
+  version: number;
   investigation_id: string;
   name: string;
   investigation_ref: string;

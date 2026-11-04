@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import GraphEdge, GraphNode, Investigation, User
 from app.security import require
+from app.services.graph import ensure_current
 
 router = APIRouter(prefix="/network", tags=["network"])
 
@@ -13,6 +14,10 @@ router = APIRouter(prefix="/network", tags=["network"])
 def network(
     investigation_id: str = "", db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))
 ):
+    if investigation_id and investigation_id != "none":
+        investigation = db.get(Investigation, investigation_id)
+        if investigation and investigation.workspace_id == user.workspace_id:
+            ensure_current(db, investigation)
     edges_query = (
         select(GraphEdge)
         .join(Investigation, GraphEdge.investigation_id == Investigation.id)

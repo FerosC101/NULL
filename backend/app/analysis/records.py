@@ -16,6 +16,24 @@ class SourceUnavailable(Exception):
         self.reason = reason
 
 
+# Uploads may hold only some record kinds, so columns the tests rely on always exist.
+EXPECTED_COLUMNS = {
+    "directory": [
+        "kind",
+        "user",
+        "hostname",
+        "src_ip",
+        "src_asn",
+        "idp_session_id",
+        "change_ref",
+        "hostnames",
+        "window_start",
+        "window_end",
+        "forwarding",
+    ],
+}
+
+
 class EvidenceReader:
     """Scoped reader. A source can be read only if it is selected and actually connected."""
 
@@ -56,9 +74,12 @@ class EvidenceReader:
         if self.as_of is not None:
             query = query.where(EvidenceRecord.ts <= self.as_of)
         rows = self.db.execute(query.order_by(EvidenceRecord.ts)).all()
+        if not rows:
+            raise SourceUnavailable(source_key, "this dataset has no records from this source")
         frame = pd.DataFrame([{"record_id": r.id, "ts": r.ts, "entity": r.entity, **r.payload} for r in rows])
-        if frame.empty:
-            frame = pd.DataFrame(columns=["record_id", "ts", "entity"])
+        for column in EXPECTED_COLUMNS.get(source_key, []):
+            if column not in frame:
+                frame[column] = None
         frame["ts"] = pd.to_datetime(frame["ts"], utc=True)
         frame = self._apply_asset_scope(source_key, frame)
         self.records_read += len(frame)
@@ -76,5 +97,5 @@ class EvidenceReader:
                 EvidenceRecord.dataset == self.dataset, EvidenceRecord.source_key == "inventory"
             )
         ).all()
-        hosts = {r["hostname"] for r in rows if r["asset_class"] in self.asset_classes}
+        hosts = {r["hostname"] for r in rows if r.get("asset_class") in self.asset_classes}
         return frame[frame["hostname"].isna() | frame["hostname"].isin(hosts)]

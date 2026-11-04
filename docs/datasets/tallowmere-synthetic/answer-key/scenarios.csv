@@ -1,0 +1,5 @@
+Snapshot,Name,Unauthorized Access,Reality,Host,Account,What Happened
+E,Payment data theft,Yes,B,HQ-FIN-0014,svc-edi,"A stolen svc-edi credential opened a VPN session, logged on to a finance workstation whose EDR agent had stopped reporting, and moved data out for 4 hours."
+F,Clean month-end,No,A,,,"No intrusion occurred. Finance worked late and traffic rose, every host reported, and independent records account for every session."
+G,Cold-room blind spot,No,A,,,"No intrusion occurred, but two cold-chain gateways had neither EDR nor independent logging, so the evidence cannot establish the claim for them. The unmatched session and the egress spike trace to an approved change."
+H,Silent ERP intrusion,Yes,C,ERP-SRV-0002,svc-erp-sync,"Monitoring coverage was complete, yet a stolen svc-erp-sync credential reached a monitored ERP server and raised no EDR alert. Only the independent records expose the session."

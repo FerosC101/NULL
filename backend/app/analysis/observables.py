@@ -20,6 +20,7 @@ from app.analysis.records import EvidenceReader, SourceUnavailable
 ALPHA = 0.01
 STALE_AFTER = timedelta(hours=24)
 NETWORK_SHIFT_LIMIT = 0.25
+MIN_BASELINE_HOURS = 24
 
 
 @dataclass
@@ -99,8 +100,8 @@ def edr_high_severity(reader: EvidenceReader, start, end) -> ObservableResult:
     )
 
 
-def idp_auth_anomaly(reader: EvidenceReader, start, end) -> ObservableResult:
-    frame = reader.frame("idp_auth")
+def failure_profile(frame: pd.DataFrame, start, end) -> dict:
+    """Hourly failed sign-ins against the same hour-of-day baseline, with the hours that exceed it."""
     failures = frame[frame["result"] == "failure"]
     baseline = failures[failures["ts"] < start]
     current = _window(failures, start, end)
@@ -108,12 +109,32 @@ def idp_auth_anomaly(reader: EvidenceReader, start, end) -> ObservableResult:
     rate_by_hour = baseline.groupby(baseline["ts"].dt.hour).size() / (baseline_hours / 24)
     counts = current.groupby(current["ts"].dt.floor("h")).size()
     tested = pd.date_range(start, end, freq="h", inclusive="left")
-    pvalues = []
-    for hour in tested:
-        rate = max(float(rate_by_hour.get(hour.hour, 0.5)), 0.5)
-        pvalues.append(float(stats.poisson.sf(int(counts.get(hour, 0)) - 1, rate)))
+    rates = [max(float(rate_by_hour.get(hour.hour, 0.5)), 0.5) for hour in tested]
+    observed = [int(counts.get(hour, 0)) for hour in tested]
+    pvalues = [float(stats.poisson.sf(c - 1, r)) for c, r in zip(observed, rates, strict=True)]
     rejected = multipletests(pvalues, alpha=ALPHA, method="fdr_bh")[0]
-    flagged = [tested[i].isoformat() for i, r in enumerate(rejected) if r]
+    return {"hours": tested, "observed": observed, "expected": rates, "rejected": rejected, "current": current}
+
+
+def idp_auth_anomaly(reader: EvidenceReader, start, end) -> ObservableResult:
+    frame = reader.frame("idp_auth")
+    # Without earlier records every hour would be measured against a floor, not this organization's normal.
+    if (start - frame["ts"].min()).total_seconds() / 3600 < MIN_BASELINE_HOURS:
+        return ObservableResult(
+            key="idp_auth_anomaly",
+            state="unavailable",
+            value=0,
+            summary=f"Fewer than {MIN_BASELINE_HOURS} hours of sign-in records come before the window, so there is no "
+            "baseline to compare it with.",
+            source_keys=["idp_auth"],
+            method="Requires a sign-in baseline before the window.",
+            reliability="low",
+            reliability_basis="The test did not run.",
+            relevance="medium",
+        )
+    profile = failure_profile(frame, start, end)
+    tested, current = profile["hours"], profile["current"]
+    flagged = [tested[i].isoformat() for i, r in enumerate(profile["rejected"]) if r]
     return ObservableResult(
         key="idp_auth_anomaly",
         state="positive" if flagged else "zero",
@@ -162,7 +183,19 @@ def network_volume(reader: EvidenceReader, start, end) -> ObservableResult:
         rows = frame[(frame["ts"] >= period_end - period) & (frame["ts"] < period_end)]
         totals.append(float(rows["bytes_out"].sum()))
         period_end -= period
-    baseline = float(np.mean(totals)) if totals else 0.0
+    if not totals:
+        return ObservableResult(
+            key="network_volume",
+            state="unavailable",
+            value=0,
+            summary="No full baseline period of network records comes before the window, so egress can't be compared.",
+            source_keys=["network"],
+            method="Requires at least one baseline period the same length as the window.",
+            reliability="low",
+            reliability_basis="The test did not run.",
+            relevance="low",
+        )
+    baseline = float(np.mean(totals))
     total = float(current["bytes_out"].sum())
     change = (total - baseline) / baseline if baseline else 0.0
     return ObservableResult(
@@ -380,11 +413,14 @@ def host_egress_test(reader: EvidenceReader, start, end) -> ObservableResult:
     network = reader.frame("network")
     frame = network[network["hostname"].isin(uncovered)].copy()
     frame["log_bytes"] = np.log1p(frame["bytes_out"].astype(float))
-    hosts, pvalues, stats_by_host = [], [], {}
+    hosts, pvalues, stats_by_host, no_baseline = [], [], {}, []
     for host, rows in frame.groupby("hostname"):
         baseline = rows[rows["ts"] < start]
         current = rows[(rows["ts"] >= start) & (rows["ts"] <= end)]
-        if len(baseline) < 24 or current.empty:
+        if current.empty:
+            continue
+        if len(baseline) < MIN_BASELINE_HOURS:
+            no_baseline.append(host)
             continue
         # Compare against this host's own hour-of-day profile so ordinary daily cycles don't register.
         profile = baseline.groupby(baseline["ts"].dt.hour)["log_bytes"].mean()
@@ -409,10 +445,12 @@ def host_egress_test(reader: EvidenceReader, start, end) -> ObservableResult:
     explained, changes_read = _egress_change_overlaps(reader, flagged, stats_by_host)
     remaining = [h for h in flagged if h not in explained]
     tested = len(hosts)
-    if not tested:
-        result_state = "zero"
+    if remaining:
+        result_state = "positive"
+    elif no_baseline and not tested:
+        result_state = "unavailable"
     else:
-        result_state = "positive" if remaining else "zero"
+        result_state = "zero"
     summary = (
         f"{len(remaining)} of {tested} tested unmonitored hosts show unexplained egress above their own baseline"
         if tested
@@ -421,10 +459,12 @@ def host_egress_test(reader: EvidenceReader, start, end) -> ObservableResult:
     if remaining:
         top = stats_by_host[remaining[0]]
         summary += (
-            f": {remaining[0]} peaked at {top['peak_bytes'] / 1e9:.1f} GB in an hour against a "
+            f": {remaining[0]} moved {top['peak_bytes'] / 1e9:.1f} GB in its most anomalous hour against a "
             f"{top['baseline_median_bytes'] / 1e6:.0f} MB median"
         )
     summary += "."
+    if no_baseline:
+        summary += f" {_count(no_baseline, 'host')} could not be tested without a baseline."
     if explained:
         summary += f" {', '.join(explained)} also spiked inside an approved change window."
     if flagged and not changes_read:
@@ -445,6 +485,7 @@ def host_egress_test(reader: EvidenceReader, start, end) -> ObservableResult:
             "tested": tested,
             "flagged": remaining,
             "explained_by_change": explained,
+            "no_baseline": no_baseline,
             "change_records_read": changes_read,
             "hosts": stats_by_host,
         },

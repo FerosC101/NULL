@@ -8,7 +8,7 @@ import pytest
 from app.analysis.claims import compile_claim
 from app.reasoning.base import Blackboard, ReasoningFailure
 from app.reasoning.factory import choose_provider, model_blocker
-from app.reasoning.meta import MetaClient, MetaProvider, WorldbuilderResult, strict_schema
+from app.reasoning.meta import ChallengerResult, MetaClient, MetaProvider, WorldbuilderResult, strict_schema
 
 
 class Tools:
@@ -191,6 +191,42 @@ def test_malformed_model_output_raises():
         MetaProvider(client_for(handler), "m").compile_claim("x", compile_claim("no unauthorized access"))
 
 
+def critique_reply(text):
+    return completion({"role": "assistant", "content": json.dumps({"critiques": [{"label": "A", "critique": text}]})})
+
+
+def test_output_over_a_limit_is_sent_back_once_to_be_corrected():
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        if "response_format" not in body:
+            return completion({"role": "assistant", "content": "done"})
+        bodies.append(body)
+        return critique_reply("x" * 701 if len(bodies) == 1 else "short")
+
+    assert MetaProvider(client_for(handler), "m").challenge(board(), Tools()) == {"A": "short"}
+    assert len(bodies) == 2
+    assert "critiques.0.critique" in bodies[1]["messages"][-1]["content"]
+    assert bodies[1]["response_format"] == bodies[0]["response_format"]
+
+
+def test_output_still_invalid_after_correction_names_the_field_and_not_the_content():
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        if "response_format" not in body:
+            return completion({"role": "assistant", "content": "done"})
+        bodies.append(body)
+        return critique_reply("secret " * 200)
+
+    with pytest.raises(ReasoningFailure, match="critiques.0.critique") as failure:
+        MetaProvider(client_for(handler), "m").challenge(board(), Tools())
+    assert len(bodies) == 2
+    assert "secret" not in str(failure.value)
+
+
 def test_unknown_claim_kind_raises():
     handler = lambda r: completion({"role": "assistant", "content": '{"kind":"always_true","interpretation":"i"}'})  # noqa: E731
     with pytest.raises(ReasoningFailure):
@@ -247,6 +283,12 @@ def test_strict_schema_meets_documented_subset():
 
     walk(schema)
     assert "anyOf" not in schema and "oneOf" not in schema
+
+
+def test_length_limits_reach_the_model_as_descriptions():
+    critique = strict_schema(ChallengerResult)["$defs"]["Critique"]["properties"]["critique"]
+    assert "maxLength" not in critique
+    assert critique["description"] == "At most 700 characters."
 
 
 def test_contributor_models_are_blocked(monkeypatch):

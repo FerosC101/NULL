@@ -32,6 +32,7 @@ log = logging.getLogger("null.meta")
 
 MAX_TOOL_TURNS = 6
 MAX_ATTEMPTS = 4
+MAX_REPAIRS = 1
 RETRYABLE = {429, 500, 503}
 MAX_MODEL_REALITIES = 2
 
@@ -117,12 +118,17 @@ class CompilerResult(BaseModel):
 
 
 def strict_schema(model: type[BaseModel]) -> dict:
-    """Pydantic schema tightened to Meta's strict subset: closed objects, all keys required."""
+    """Pydantic schema tightened to Meta's strict subset: closed objects, all keys required.
+
+    Length limits aren't part of that subset, so they travel as descriptions the model can read.
+    """
     schema = model.model_json_schema()
 
     def tighten(node: dict) -> None:
-        for keyword in ("title", "maxLength", "maxItems"):
-            node.pop(keyword, None)
+        node.pop("title", None)
+        for keyword, unit in (("maxLength", "characters"), ("maxItems", "items")):
+            if keyword in node:
+                node["description"] = f"At most {node.pop(keyword)} {unit}."
         if node.get("type") == "object" and "properties" in node:
             node["additionalProperties"] = False
             node["required"] = list(node["properties"])
@@ -299,19 +305,28 @@ class MetaProvider:
             return {"error": str(exc)}
 
     def _structured(self, messages: list[dict], schema: type[BaseModel]):
-        body = self._body(messages)
-        body["response_format"] = {
+        response_format = {
             "type": "json_schema",
             "json_schema": {"name": schema.__name__, "strict": True, "schema": strict_schema(schema)},
         }
-        message = _first_message(self.client.chat(body))
-        content = message.get("content")
-        if not content:
-            raise ReasoningFailure("Model returned no structured content")
-        try:
-            return schema.model_validate_json(content)
-        except ValidationError as exc:
-            raise ReasoningFailure(f"Model output failed validation: {exc.error_count()} errors") from exc
+        messages = list(messages)
+        for attempt in range(MAX_REPAIRS + 1):
+            body = self._body(messages)
+            body["response_format"] = response_format
+            message = _first_message(self.client.chat(body))
+            content = message.get("content")
+            if not content:
+                raise ReasoningFailure("Model returned no structured content")
+            try:
+                return schema.model_validate_json(content)
+            except ValidationError as exc:
+                problems = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+                if attempt == MAX_REPAIRS:
+                    raise ReasoningFailure(f"Model output failed validation: {problems}") from exc
+            messages.append({"role": "assistant", "content": content})
+            messages.append(
+                {"role": "user", "content": f"That result was rejected: {problems}. Return all of it again, corrected."}
+            )
 
     def _body(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
         body: dict[str, Any] = {

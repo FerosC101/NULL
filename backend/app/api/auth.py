@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import User
 from app.security import COOKIE_NAME, audit, current_user, issue_token, verify_password
+from app.services.datasets import active
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -76,6 +77,7 @@ def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
             "name": workspace.name,
             "is_demo": workspace.is_demo,
             "active_dataset": settings.get("active_dataset", "A"),
+            "dataset": active(db, workspace).out(),
         },
         "ai": ai_status(settings.get("ai", {})),
     }

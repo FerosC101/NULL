@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.analysis.claims import compile_claim
 from app.api.deps import get_investigation, get_workspace
-from app.api.serializers import investigation_detail, investigation_summary, raw_records
+from app.api.serializers import investigation_card, investigation_detail, raw_records
 from app.db import get_db
-from app.demo.generator import DATASETS, WINDOW_END
 from app.demo.seed import next_ref
 from app.models import DataSource, EvidenceItem, GroundTruth, Investigation, RecommendedCheck, User, utcnow
 from app.security import audit, require
+from app.services import exhibits
+from app.services.datasets import DatasetInfo, active, available, describe, last_hours
 from app.services.orchestrator import analyze, create_timeline, execute_checks, in_background
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
@@ -30,15 +31,10 @@ class InvestigationBody(ClaimBody):
     objective: str = Field(default="", max_length=2000)
     dataset: str
     window_hours: int = 24
+    window_start: datetime | None = None
+    window_end: datetime | None = None
     asset_classes: list[str] = []
     source_keys: list[str] = Field(min_length=1, max_length=20)
-
-    @field_validator("dataset")
-    @classmethod
-    def known_dataset(cls, value: str) -> str:
-        if value not in DATASETS:
-            raise ValueError("Unknown dataset")
-        return value
 
     @field_validator("window_hours")
     @classmethod
@@ -65,11 +61,32 @@ class RejectBody(BaseModel):
     reason: str = Field(default="", max_length=500)
 
 
+def _resolve_window(dataset: DatasetInfo, body: InvestigationBody) -> tuple[datetime, datetime, str]:
+    """The period under examination. It has to sit inside the records, on whole hours, for the hourly tests."""
+    if body.window_start is None and body.window_end is None:
+        start, end = last_hours(dataset, body.window_hours)
+        if end - start == timedelta(hours=body.window_hours):
+            return start, end, f"{WINDOW_HOURS[body.window_hours]} of the snapshot"
+        hours = int((end - start).total_seconds() // 3600)
+        return start, end, f"All {hours} hour{'' if hours == 1 else 's'} of the dataset"
+    start, end = body.window_start, body.window_end
+    if start is None or end is None or start.tzinfo is None or end.tzinfo is None:
+        raise HTTPException(422, "Give both a start and an end, with a time zone")
+    if start >= end:
+        raise HTTPException(422, "The period must end after it starts")
+    if start.minute or start.second or end.minute or end.second:
+        raise HTTPException(422, "The period must start and end on the hour")
+    if start < dataset.window_start or end > dataset.window_end:
+        raise HTTPException(422, "The period must fall inside the dataset")
+    return start, end, "Custom period"
+
+
 @router.get("/options")
 def options(db: Session = Depends(get_db), user: User = Depends(require("investigations.read"))):
     sources = db.scalars(select(DataSource).where(DataSource.workspace_id == user.workspace_id)).all()
     return {
-        "datasets": [{"key": k, "label": v["label"]} for k, v in DATASETS.items()],
+        "active_dataset": active(db, get_workspace(db, user)).key,
+        "datasets": [d.out() for d in available(db, user.workspace_id)],
         "windows": [{"hours": h, "label": f"{label} of the snapshot"} for h, label in WINDOW_HOURS.items()],
         "asset_classes": [{"key": k, "label": v} for k, v in ASSET_CLASSES.items()],
         "sources": [
@@ -118,7 +135,7 @@ def list_investigations(
     if until:
         query = query.where(Investigation.created_at <= until)
     rows = db.scalars(query.order_by(Investigation.updated_at.desc())).all()
-    return [investigation_summary(i) for i in rows]
+    return [investigation_card(db, i) for i in rows]
 
 
 @router.post("", status_code=201)
@@ -133,6 +150,10 @@ def create_investigation(
     unknown = set(body.source_keys) - known
     if unknown:
         raise HTTPException(422, f"Unknown sources: {', '.join(sorted(unknown))}")
+    dataset = describe(db, body.dataset, user.workspace_id)
+    if dataset is None:
+        raise HTTPException(422, "Unknown dataset")
+    window_start, window_end, window_label = _resolve_window(dataset, body)
     labels = [ASSET_CLASSES[a] for a in body.asset_classes]
     investigation = Investigation(
         workspace_id=user.workspace_id,
@@ -142,9 +163,9 @@ def create_investigation(
         objective=body.objective.strip(),
         dataset=body.dataset,
         scope={
-            "window_start": (WINDOW_END - timedelta(hours=body.window_hours)).astimezone(UTC).isoformat(),
-            "window_end": WINDOW_END.isoformat(),
-            "window_label": f"{WINDOW_HOURS[body.window_hours]} of the snapshot",
+            "window_start": window_start.astimezone(UTC).isoformat(),
+            "window_end": window_end.astimezone(UTC).isoformat(),
+            "window_label": window_label,
             "assets_label": ", ".join(labels) or "All in-scope assets",
             "asset_classes": body.asset_classes,
         },
@@ -168,6 +189,15 @@ def get_detail(
     user: User = Depends(require("investigations.read")),
 ):
     return investigation_detail(db, get_investigation(db, user, investigation_id))
+
+
+@router.get("/{investigation_id}/exhibits")
+def get_exhibits(
+    investigation_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require("investigations.read")),
+):
+    return exhibits.compute(db, get_investigation(db, user, investigation_id))
 
 
 @router.get("/{investigation_id}/evidence/{ref}")

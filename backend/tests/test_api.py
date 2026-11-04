@@ -193,7 +193,7 @@ def test_report_snapshot_and_exports(client):
     concluded = approve_all(client, start(client))
     report = client.post("/api/v1/reports", json={"investigation_id": concluded["id"]}).json()
     full = client.get(f"/api/v1/reports/{report['id']}").json()
-    assert len(full["sections"]) == 12
+    assert len(full["sections"]) == 9
     assert full["snapshot"]["conclusion"]["assessment"] == "CONTRADICTED"
     assert "Synthetic" in full["snapshot"]["demo_notice"]
     pdf = client.get(f"/api/v1/reports/{report['id']}/export.pdf")

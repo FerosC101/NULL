@@ -6,7 +6,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api import assurance, auth, investigations, network, overview, reports, settings, sources
+from app.api import assurance, auth, imports, investigations, network, overview, reports, settings, sources
 from app.config import get_settings
 from app.db import engine
 from app.services.orchestrator import mark_interrupted
@@ -49,7 +49,7 @@ async def security_headers(request: Request, call_next):
 
 
 api = APIRouter(prefix="/api/v1")
-for module in (auth, overview, investigations, network, assurance, reports, sources, settings):
+for module in (auth, overview, investigations, network, assurance, reports, sources, imports, settings):
     api.include_router(module.router)
 
 

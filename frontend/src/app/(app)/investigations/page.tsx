@@ -3,11 +3,12 @@
 import { Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { MiniRail } from "@/components/lifecycle";
 import { useSession } from "@/components/shell";
 import { AssessmentMark, Empty, ErrorNote, Loading, LinkButton, PageHeader, StatusText } from "@/components/ui";
 import { useApi } from "@/lib/api";
-import { ago, utc } from "@/lib/format";
-import type { InvestigationSummary } from "@/lib/types";
+import { ago } from "@/lib/format";
+import type { InvestigationCard } from "@/lib/types";
 
 const STATUSES = [
   ["", "All statuses"],
@@ -36,7 +37,7 @@ export default function InvestigationsPage() {
     if (until) params.set("until", new Date(`${until}T23:59:59Z`).toISOString());
     return params.toString();
   }, [q, status, assessment, since, until]);
-  const { data, error, loading, reload } = useApi<InvestigationSummary[]>(`/investigations${query ? `?${query}` : ""}`);
+  const { data, error, loading, reload } = useApi<InvestigationCard[]>(`/investigations${query ? `?${query}` : ""}`);
   const filtered = Boolean(query);
 
   return (
@@ -60,8 +61,13 @@ export default function InvestigationsPage() {
           <option value="">All conclusions</option>
           {ASSESSMENTS.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
-        <input aria-label="Created from" type="date" className="field !w-auto" value={since} onChange={(e) => setSince(e.target.value)} />
-        <input aria-label="Created until" type="date" className="field !w-auto" value={until} onChange={(e) => setUntil(e.target.value)} />
+        <details className="text-[13px] text-dim">
+          <summary className="cursor-pointer transition-colors hover:text-fg">Dates</summary>
+          <span className="mt-2 flex flex-wrap gap-2">
+            <input aria-label="Created from" type="date" className="field !w-auto" value={since} onChange={(e) => setSince(e.target.value)} />
+            <input aria-label="Created until" type="date" className="field !w-auto" value={until} onChange={(e) => setUntil(e.target.value)} />
+          </span>
+        </details>
       </div>
 
       {error && <ErrorNote message={error} onRetry={reload} />}
@@ -79,21 +85,20 @@ export default function InvestigationsPage() {
         <ul className="divide-y divide-line border-y border-line">
           {data.map((investigation) => (
             <li key={investigation.id}>
-              <Link href={`/investigations/${investigation.id}`} className="-mx-3 grid gap-x-8 gap-y-1.5 rounded-md px-3 py-4 transition-colors hover:bg-surface md:grid-cols-[minmax(0,1fr)_210px_110px]">
+              <Link href={`/investigations/${investigation.id}`} className="-mx-3 grid gap-x-8 gap-y-2 rounded-md px-3 py-4 transition-colors hover:bg-surface md:grid-cols-[minmax(0,1fr)_260px]">
                 <span className="min-w-0">
-                  <span className="flex items-baseline gap-3">
-                    <span className="truncate text-[15px]">{investigation.name}</span>
-                    <span className="mono shrink-0 text-[11px] text-mute">{investigation.ref}</span>
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="text-[15px]">{investigation.name}</span>
+                    <span className="mono text-[11px] text-mute">{investigation.ref}</span>
+                    <AssessmentMark value={investigation.assessment} />
                   </span>
                   <span className="mt-0.5 block truncate text-[13px] text-dim">{investigation.claim}</span>
-                  <span className="mt-1 block text-xs text-mute">
-                    {utc(investigation.created_at)} · {investigation.source_keys.length} evidence sources · {investigation.dataset_label}
-                  </span>
+                  {investigation.key_finding && <span className="mt-0.5 block truncate text-xs text-mute">{investigation.key_finding.title}</span>}
                 </span>
-                <span className="self-center"><AssessmentMark value={investigation.assessment} /></span>
-                <span className="self-center md:text-right">
-                  <StatusText status={investigation.status} />
-                  <span className="block text-xs text-mute">{ago(investigation.updated_at)}</span>
+                <span className="min-w-0">
+                  <MiniRail stages={investigation.stages} />
+                  <span className="mt-2 block truncate text-[13px]">{investigation.next_action.label}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 text-xs text-mute"><StatusText status={investigation.status} /> · {ago(investigation.updated_at)}</span>
                 </span>
               </Link>
             </li>
